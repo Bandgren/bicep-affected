@@ -1,198 +1,182 @@
 # bicep-affected
 
-`bicep-affected` determines which Bicep deployment entrypoints, publishable modules, and helpers are affected by a changed-file set. By default it emits a human-readable text report; it can also emit a deterministic JSON contract.
+`bicep-affected` turns a changed-file set into a deterministic, actionable Bicep selection. It never emits deployment, build, or publish commands: the consuming repository maps the returned paths to its own trusted policy.
 
-## Install
+## Install beta.3
 
-The beta is currently distributed as a public package asset on the [0.1.0-beta.2 GitHub release](https://github.com/Bandgren/bicep-affected/releases/tag/v0.1.0-beta.2); it is **not yet indexed on NuGet.org**.
+The current release is [0.1.0-beta.3](https://github.com/Bandgren/bicep-affected/releases/tag/v0.1.0-beta.3). It is distributed as a GitHub release package asset and is **not yet indexed on NuGet.org**.
 
-1. Download `BicepAffected.0.1.0-beta.2.nupkg` into a local directory such as `./downloaded-packages`.
-2. Install it from that directory:
+1. Download `BicepAffected.0.1.0-beta.3.nupkg` into `./downloaded-packages`.
+2. Install the pinned prerelease from that explicit source:
 
 ```bash
 dotnet tool install --global BicepAffected \
-  --version 0.1.0-beta.2 \
+  --version 0.1.0-beta.3 \
   --add-source ./downloaded-packages
 bicep-affected --help
 ```
 
-The shorter `dotnet tool install --global BicepAffected --version 0.1.0-beta.2` command will work only after the package is published and indexed on NuGet.org. For repository-local installation and publishing status, see [public publishing](docs/public-publishing.md).
+For a repository-local installation, use `dotnet new tool-manifest` and omit `--global`. The shorter NuGet.org installation command is unavailable until NuGet.org has indexed the package; see [public publishing](docs/public-publishing.md).
 
-To build from source, use the SDK pinned by `global.json` and the committed dependency locks:
-
-```bash
-dotnet restore --locked-mode
-dotnet build --configuration Release --no-restore
-dotnet test --configuration Release --no-build --no-restore
-dotnet pack src/BicepAffected.Cli/BicepAffected.Cli.csproj --configuration Release --no-build --no-restore
-```
-
-## Commands and changed-file input
+## Actionable output
 
 ```text
-bicep-affected affected [options]
-bicep-affected graph [options]
+bicep-affected affected [options]  # one selected path per line, or JSON
+bicep-affected explain [options]   # selected targets with reasons and chains
+bicep-affected graph [options]     # repository dependency topology
 ```
 
-`affected` requires **exactly one** changed-file input mode:
+`affected` and `explain` require exactly one changed-file mode: repeat `--changed-file <path>`, pipe line-oriented input to `--changed-files-stdin`, or pass both `--from <git-ref>` and `--to <git-ref>`. Paths are repository-relative. `graph` does not take changed-file or target-selection options.
 
-1. One or more `--changed-file <path>` options. This option is repeatable.
-2. `--changed-files-stdin`, with one path per input line. Empty lines are ignored.
-3. Both `--from <git-ref>` and `--to <git-ref>`, which obtains paths from Git.
+Use `--target build|deploy|publish` to select an action class; the default is `deploy`:
 
-The modes cannot be combined; supplying only one of `--from` and `--to` is an error. Explicit and stdin inputs are de-duplicated and sorted without rewriting the supplied Git path spelling. Use paths relative to the repository root. For example:
+| Target | `targets` contains |
+| --- | --- |
+| `deploy` (default) | affected deployment entrypoints |
+| `build` | affected deployment entrypoints and publishable modules |
+| `publish` | affected publishable modules with changed, readable configured version metadata |
 
-```bash
-bicep-affected affected --repo . --changed-file 'infra/shared/types.bicep'
-printf '%s\n' 'infra/shared/types.bicep' | bicep-affected affected --repo . --changed-files-stdin
-bicep-affected affected --repo . --from origin/master --to HEAD
-```
+### APIM policy change: affected paths and causality
 
-`graph` has no changed-file input. It accepts `--repo`, `--config`, `--format text|json`, and `--allow-warnings`; affected-only options (including `--include`, `--publish-version-file`, and fail policies) are rejected.
-
-Common `affected` options are:
-
-```text
---repo <path>                         Repository root (default: current directory)
---config <path>                       Config file (default lookup: bicep-affected.json)
---format text|json                    Output format (default: text)
---include all|entrypoints|modules|helpers
---publish-version-file <file>         Repeatable simple adjacent filename
---output <path>                       Write rendered output to a file
---fail-if-affected                    Exit 2 if an affected item exists
---fail-if-none                        Exit 3 if no affected item exists
---allow-warnings                      Opt out of the default warning failure
-```
-
-`--publish-version-file` must be a nonempty basename: no directory separator, absolute path, `.` or `..`. Use `--output` to write the rendered payload to a file:
-
-```bash
-bicep-affected affected --repo . --from origin/master --to HEAD --format json --output affected.json
-```
-
-### Default text output
-
-Without `--format`, the report is human-readable text. For the monorepo fixture, changing `apis/employees/openapi.yaml` affects `deployments/employees/main.bicep` through a content-load reverse dependency:
-
-```text
-Changed files:
-  apis/employees/openapi.yaml
-
-Affected entrypoints:
-  deployments/employees/main.bicep
-    reason: Affected through content-load dependency. caused by apis/employees/openapi.yaml
-    chain: apis/employees/openapi.yaml -> deployments/employees/main.bicep
-```
-
-Use `--format json` only when another trusted program needs to consume the result.
-
-### Select Bicep entrypoints to deploy
-
-Content loaded by a Bicep file is part of the dependency graph. For example, the fixture entrypoint `deployments/employees/main.bicep` calls `loadTextContent('../../apis/employees/policy.xml')`. Changing that APIM policy marks the entrypoint as affected:
+If `deployments/employees/main.bicep` loads `../../apis/employees/policy.xml`, an APIM policy edit selects that deployment entrypoint:
 
 ```bash
 bicep-affected affected \
   --repo . \
-  --changed-file apis/employees/policy.xml \
-  --include entrypoints \
-  --format json \
-  --output affected.json
-
-jq -r '.entrypoints[].path' affected.json
+  --changed-file apis/employees/policy.xml
 ```
+
+The default text output is deliberately machine-friendly—one path per line:
 
 ```text
 deployments/employees/main.bicep
 ```
 
-For a Git comparison, replace `--changed-file` with `--from <base-ref> --to <target-ref>`. A deployment job can iterate the same array:
+Use `explain` when a reviewer needs causality rather than a selection list:
 
 ```bash
-jq -r '.entrypoints[].path' affected.json |
-  while IFS= read -r bicep_path; do
-    ./ci/deploy-bicep.sh "$bicep_path"
-  done
+bicep-affected explain \
+  --repo . \
+  --changed-file apis/employees/policy.xml \
+  --target deploy
 ```
 
-The tool deliberately returns affected paths and reasons rather than deployment commands. The trusted `deploy-bicep.sh` owned by the consuming repository must validate each path and map it to the correct deployment scope, environment, parameter file, and credentials. Keep warning handling fail-closed in deployment jobs; an incomplete graph must not silently skip a deployment.
+```text
+Changed files:
+  apis/employees/policy.xml
 
-## Exit and warning policy
+Selected deploy targets:
+  deployments/employees/main.bicep
+    reason: Affected through content-load dependency. caused by apis/employees/policy.xml
+    chain: apis/employees/policy.xml -> deployments/employees/main.bicep
+```
 
-| Exit | Meaning |
-| --- | --- |
-| `0` | Successful analysis with no warnings, or warnings explicitly permitted by `--allow-warnings` |
-| `1` | Invalid command/options, runtime/analysis error, or any warning without `--allow-warnings` |
-| `2` | `--fail-if-affected` and at least one affected item |
-| `3` | `--fail-if-none` and no affected items |
+The exact reason wording depends on the discovered dependency; the selected path, reason, and complete reverse-dependency chain identify why the trusted deploy script received that path.
 
-Warnings are printed to standard error and are **fail-closed by default**. They take precedence over exits 2 and 3. `--allow-warnings` does not hide warnings or convert errors to success; reserve it for a deliberate, non-blocking shadow comparison during rollout.
+### JSON deployment, build, and publish selection
+
+Use JSON when a trusted program needs selection metadata. The affected payload has `schemaVersion: 3` and one canonical `targets` array.
+
+```bash
+# Deployment selection (the default target is deploy)
+bicep-affected affected --repo . \
+  --changed-file apis/employees/policy.xml \
+  --format json --target deploy --output deploy.json
+
+jq -e '.schemaVersion == 3 and .target == "deploy" and (.targets | type == "array")' deploy.json >/dev/null
+jq -r '.targets[].path' deploy.json
+```
+
+```bash
+# Build selection: entrypoints plus affected publishable modules
+bicep-affected affected --repo . --from origin/master --to HEAD \
+  --format json --target build --output build.json
+jq -r '.targets[].path' build.json
+```
+
+```bash
+# Publish selection: only version-gated affected publishable modules
+bicep-affected affected --repo . --from origin/master --to HEAD \
+  --target publish --format json --output publish.json
+jq -r '.targets[] | select(.versionTag != null) | .path' publish.json
+```
+
+A selected item includes `path`, `kind`, `directory`, `fileName`, `artifactName`, `versionFile`, `version`, `versionTag`, `hasVersionChange`, and `reasons`. Publish consumers must apply their own allowlisted registry, module-name, environment, and credential mapping; output data is not executable authority.
+
+The payload fields are:
+
+```text
+schemaVersion, target, hasTargets, targetCount,
+changedFiles, targets, warnings
+```
+
+For an empty selection, text output is empty (no lines). JSON still provides an explicit result, for example `"hasTargets": false`, `"targetCount": 0`, and `"targets": []`. `--fail-if-none` can make that selection exit with code 3.
+
+### Output files and warnings
+
+`--output <path>` writes the rendered payload **only to that file**; it does not duplicate normal rendered output to stdout. Warnings always go to stderr. For `affected` and `explain`, warnings fail closed before any payload is rendered or written unless `--allow-warnings` is explicitly supplied. Reserve `--allow-warnings` for a visibly non-blocking shadow comparison, not deployment or publishing.
+
+```bash
+bicep-affected affected --repo . --from origin/master --to HEAD \
+  --target deploy --format json --output affected.json
+# Read the file; stdout carries no rendered payload when --output is set.
+jq -r '.targets[].path' affected.json
+```
+
+## Options and exit policy
+
+```text
+--repo <path>                         Repository root (default: current directory)
+--config <path>                       Optional bicep-affected.json path
+--format text|json                    Affected/graph format (default: text)
+--target build|deploy|publish          Action target (default: deploy)
+--output <path>                       Write rendered output only to a file
+--publish-version-file <file>         Repeatable adjacent filename for publish gating
+--fail-if-affected                    Exit 2 when selected targets exist
+--fail-if-none                        Exit 3 when no selected targets exist
+--allow-warnings                      Explicitly permit warnings
+```
+
+`--publish-version-file` is a nonempty basename only. Exit 1 covers invalid input, analysis errors, and warnings not explicitly allowed; exit 2 is `--fail-if-affected` with selected targets; exit 3 is `--fail-if-none` with no selected targets. Warnings take precedence over exits 2 and 3.
+
+## JSON graph contract
+
+`graph --format json` remains independent from action selection and uses `schemaVersion: 1`, with sorted `nodes`, `edges`, `warnings`, and `parseDiagnosticFiles`. Graph node and edge kinds are strings. Use it to inspect topology; do not treat it as an affected-action payload.
 
 ## Configuration
 
-Configuration is optional. With no configuration file, the defaults are empty `entrypoints` and `helpers`, one publishable-module rule (`**/*.bicep` with adjacent `metadata.json`), and `**/bicepconfig.json` as a global-impact pattern.
-
-Use the strict [configuration schema](bicep-affected.schema.json) in external editor/CI validation. Do not add a `$schema` member to the runtime config: the loader rejects unknown properties. It accepts JSON comments and trailing commas, property names are case-insensitive, and each configured collection must be an array with no `null` entries.
+Configuration is optional. The strict [configuration schema](bicep-affected.schema.json) documents `entrypoints`, `helpers`, `publishableModules`, and `globalImpactFiles`. Do not add `$schema` to the runtime config: unknown properties are rejected. Omitted collections select defaults; explicit empty arrays select no values for that collection.
 
 ```json
 {
-  "entrypoints": [
-    "deployments/**/*.bicep",
-    "components/*/infrastructure/*.bicep"
-  ],
+  "entrypoints": ["deployments/**/*.bicep"],
   "helpers": ["infra/shared/**/*.bicep"],
   "globalImpactFiles": ["bicepconfig.json"],
-  "publishableModules": [
-    {
-      "path": "modules/**/*.bicep",
-      "metadata": "metadata.json"
-    }
-  ]
+  "publishableModules": [{ "path": "modules/**/*.bicep", "metadata": "metadata.json" }]
 }
 ```
 
-All four properties are optional. **Omitting** a property selects its default; an **explicit empty array** selects no values for that property. In particular, omit `publishableModules` to retain the default publishable-module rule, or set `"publishableModules": []` to disable module classification. A rule may omit `path` or `metadata`, which respectively default to `**/*.bicep` and `metadata.json`.
+Repository, config, changed, and dependency paths are constrained to the repository; traversal, NUL-containing paths, and symlink escape are rejected.
 
-Repository paths are constrained defensively. The repository root must exist; a config path must resolve inside it; changed and dependency paths cannot be empty, NUL-containing, traversing outside the root, or escape through a symlink. Git paths are retained as supplied rather than normalized into a different spelling in output.
+## beta.2 → beta.3 migration
 
-## JSON contracts
+beta.3 is a clean breaking migration. Update every consumer at once; do not preserve compatibility parsing for beta.2 output.
 
-Both JSON formats use `schemaVersion: 2`. JSON is indented, camel-cased, deterministic, and data-only: it contains no shell command such as `buildCommand`.
+| beta.2 (superseded) | beta.3 |
+| --- | --- |
+| `--include all|entrypoints|modules|helpers` | `--target build|deploy|publish` (default `deploy`) |
+| Default affected text was explanatory | `affected` emits one selected path per line; use `explain` for reasons and chains |
+| Affected JSON `schemaVersion: 2` | Affected JSON `schemaVersion: 3` |
+| Category arrays (`entrypoints`, `publishableModulesToPublish`, and similar) were the action contract | `.targets` is the sole action-selection array; validate `target` and schema version |
+| `--output` also duplicated rendered output on stdout | `--output` writes only the specified file; warnings remain stderr |
 
-`affected --format json` contains `hasAffected`, `hasPublishableModulesToPublish`, `counts`, sorted `changedFiles`, the canonical affected arrays (`entrypoints`, `publishableModules`, `publishableModulesToPublish`, `publishableModulesWithoutVersionChange`, and `helpers`), and sorted `warnings`. An affected item has the data fields:
+Historical beta.2 references in review material are explicitly superseded and are not operational guidance.
 
-```text
-path, kind, directory, fileName, artifactName,
-versionFile, version, versionTag, hasVersionChange, reasons
-```
+## Safe rollout and workflows
 
-Kinds are strings, not numeric enums. Affected-item kinds are `entrypoint`, `publishableModule`, or `helper`; graph node kinds additionally include `unknownBicepFile`, `contentFile`, and `configFile`; edge kinds are `localModule`, `compileTimeImport`, `contentLoad`, `directoryContent`, `parameterFile`, `globalConfig`, or `externalModule`. `artifactName` is stable and filesystem-oriented: a lower-case path stem with non-alphanumeric characters changed to `-`, followed by `-`, the first 12 lower-case hex characters of the SHA-256 of the normalized path, and `-bicep`. Do not reconstruct or use an artifact name as a command.
+Start with a non-blocking shadow comparison, retain a scheduled or manual full-validation fallback, and make affected selection blocking only after it agrees with full validation. A blocking job must fail closed on warnings. See [GitHub Actions examples](docs/github-actions-poc.md) for protected environments, trusted path-to-deployment mapping, quoted JSON parsing, and full-validation fallback.
 
-`graph --format json` has `schemaVersion: 2`, sorted `nodes`, sorted `edges`, sorted `warnings`, and sorted `parseDiagnosticFiles`. Node and edge kinds are likewise strings; nullable graph fields remain JSON `null` when absent.
-
-## CI rollout, fallback, and recovery
-
-Adopt affected validation in stages:
-
-1. Run the new detector beside the existing full validation and use `--allow-warnings` only in that explicitly named shadow job.
-2. Compare the detector’s JSON with the full-validation result and fix configuration or graph gaps.
-3. Make the affected job blocking only after the comparison is reliable; keep warnings fail-closed.
-4. Retain a manual or scheduled **full-validation fallback** that validates every relevant Bicep file, and use it immediately when the detector fails, reports warnings, or its result is questionable.
-
-To upgrade, pin a tested tool version in each workflow, run shadow validation, then promote that version. To roll back, replace the pinned tool version with the last known-good version and enable the full-validation fallback; do not suppress detector warnings to keep a broken rollout green.
-
-### Troubleshooting
-
-- **Exit 1 with `warning:` output:** investigate the warning or run the documented full-validation fallback. Do not add `--allow-warnings` to a blocking job.
-- **No changes detected:** ensure exactly one input mode is used, fetch the compared refs, and use a repository-relative path.
-- **Config rejected:** validate against [bicep-affected.schema.json](bicep-affected.schema.json), remove unknown keys/nulls, and ensure the config path stays inside the repository.
-- **Path escape error:** remove `..`, absolute paths, or a symlink that resolves outside the repository.
-- **Unexpected publish skip:** inspect `publishableModulesWithoutVersionChange`; only modules with a changed adjacent configured version file appear in `publishableModulesToPublish`.
-
-## Workflow and publishing examples
-
-The secure GitHub Actions examples—including SHA-pinned actions, environment/quoted shell boundaries, diagnostic uploads, unprivileged PR validation, and protected publishing—are in [docs/github-actions-poc.md](docs/github-actions-poc.md). Public NuGet installation and OIDC trusted publishing are in [docs/public-publishing.md](docs/public-publishing.md).
-
-The implementation and CLI review records are maintained in [docs/cli-review.md](docs/cli-review.md) and [docs/review.md](docs/review.md). Their historical findings are labeled by current resolution status.
+See [CLI review](docs/cli-review.md), [implementation review](docs/review.md), and [public publishing](docs/public-publishing.md) for the corresponding current policy.
 
 ## License
 

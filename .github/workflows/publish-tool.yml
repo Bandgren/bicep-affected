@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Package version, for example 0.1.0-beta.2
+        description: Package version, for example 0.1.0-beta.3
         required: true
         type: string
 

@@ -25,7 +25,8 @@ internal static class Cli
 
             return command.ToLowerInvariant() switch
             {
-                "affected" => RunAffected(options),
+                "affected" => RunAction(options, explain: false),
+                "explain" => RunAction(options, explain: true),
                 "graph" => RunGraph(options),
                 _ => Fail($"Unknown command '{command}'.")
             };
@@ -37,7 +38,7 @@ internal static class Cli
         }
     }
 
-    private static int RunAffected(CliOptions options)
+    private static int RunAction(CliOptions options, bool explain)
     {
         ValidateAffectedOptions(options);
         var repoRoot = PathNormalizer.NormalizeRoot(options.Repo ?? Directory.GetCurrentDirectory());
@@ -45,27 +46,26 @@ internal static class Cli
         var changedFiles = ResolveChangedFiles(repoRoot, options);
         var publishVersionFiles = GetPublishVersionFiles(config, options.PublishVersionFiles);
         var result = new AffectedAnalyzer().Analyze(repoRoot, changedFiles, config, publishVersionFiles);
-        var filteredResult = ResultFilter.Apply(result, options.Include);
+        var selection = ActionSelection.Select(result, options.Target, repoRoot, publishVersionFiles);
+        var payload = ActionPayload.FromSelection(selection);
 
-        var payload = CiPayload.FromResult(filteredResult, repoRoot, publishVersionFiles);
-        WriteRenderedOutput(options, RenderAffectedResult(options.Format, filteredResult, payload));
         WriteWarnings(payload.Warnings);
-
         if (payload.Warnings.Count > 0 && !options.AllowWarnings)
         {
             return 1;
         }
 
-        var hasAffected = filteredResult.Entrypoints.Count > 0
-            || filteredResult.PublishableModules.Count > 0
-            || filteredResult.Helpers.Count > 0;
+        var rendered = explain
+            ? TextRenderer.RenderExplain(selection)
+            : RenderAffectedResult(options.Format, selection, payload);
+        WriteRenderedOutput(options, rendered);
 
-        if (options.FailIfAffected && hasAffected)
+        if (options.FailIfAffected && payload.HasTargets)
         {
             return 2;
         }
 
-        if (options.FailIfNone && !hasAffected)
+        if (options.FailIfNone && !payload.HasTargets)
         {
             return 3;
         }
@@ -152,9 +152,9 @@ internal static class Cli
             ignoredOptions.Add("--changed-files-stdin");
         }
 
-        if (options.IncludeSet)
+        if (options.TargetSet)
         {
-            ignoredOptions.Add("--include");
+            ignoredOptions.Add("--target");
         }
 
         if (options.PublishVersionFiles.Count > 0)
@@ -241,9 +241,9 @@ internal static class Cli
                 case "--format":
                     options.Format = ReadValue(args, ref index, current).ToLowerInvariant();
                     break;
-                case "--include":
-                    options.IncludeSet = true;
-                    options.Include = ParseInclude(ReadValue(args, ref index, current));
+                case "--target":
+                    options.TargetSet = true;
+                    options.Target = ParseTarget(ReadValue(args, ref index, current));
                     break;
                 case "--publish-version-file":
                     var publishVersionFile = ReadValue(args, ref index, current);
@@ -286,15 +286,14 @@ internal static class Cli
         return args[index];
     }
 
-    private static IncludeFilter ParseInclude(string value)
+    private static ActionTarget ParseTarget(string value)
     {
         return value.ToLowerInvariant() switch
         {
-            "all" => IncludeFilter.All,
-            "entrypoints" => IncludeFilter.Entrypoints,
-            "modules" => IncludeFilter.Modules,
-            "helpers" => IncludeFilter.Helpers,
-            _ => throw new InvalidOperationException("--include must be one of: all, entrypoints, modules, helpers.")
+            "build" => ActionTarget.Build,
+            "deploy" => ActionTarget.Deploy,
+            "publish" => ActionTarget.Publish,
+            _ => throw new InvalidOperationException("--target must be one of: build, deploy, publish.")
         };
     }
     private static void ValidatePublishVersionFileName(string value)
@@ -311,12 +310,12 @@ internal static class Cli
     }
 
 
-    private static string RenderAffectedResult(string format, AffectedResult result, CiPayload payload)
+    private static string RenderAffectedResult(string format, ActionSelection selection, ActionPayload payload)
     {
         return format.ToLowerInvariant() switch
         {
             "json" => JsonRenderer.Render(payload),
-            _ => TextRenderer.Render(result with { Warnings = payload.Warnings })
+            _ => TextRenderer.RenderAffected(selection)
         };
     }
 
@@ -344,11 +343,14 @@ internal static class Cli
     {
         if (!string.IsNullOrWhiteSpace(options.OutputPath))
         {
-            File.WriteAllText(options.OutputPath, rendered + Environment.NewLine);
+            File.WriteAllText(options.OutputPath, rendered.Length == 0 ? string.Empty : rendered + Environment.NewLine);
+            return;
         }
 
-
-        Console.WriteLine(rendered);
+        if (rendered.Length > 0)
+        {
+            Console.WriteLine(rendered);
+        }
     }
     private static void WriteWarnings(IEnumerable<string> warnings)
     {
@@ -372,6 +374,7 @@ internal static class Cli
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  bicep-affected affected [options]");
+        Console.WriteLine("  bicep-affected explain [options]");
         Console.WriteLine("  bicep-affected graph [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
@@ -381,12 +384,12 @@ internal static class Cli
         Console.WriteLine("  --changed-file <path>         Explicit changed file. Repeatable.");
         Console.WriteLine("  --changed-files-stdin         Read changed files from stdin.");
         Console.WriteLine("  --config <path>               Optional bicep-affected.json path.");
-        Console.WriteLine("  --format text|json             Output format. Defaults to text.");
-        Console.WriteLine("  --include all|entrypoints|modules|helpers");
+        Console.WriteLine("  --format text|json            Affected output format. Defaults to text.");
+        Console.WriteLine("  --target build|deploy|publish Action target. Defaults to deploy.");
         Console.WriteLine("  --output <path>               Write rendered output to a file.");
         Console.WriteLine("  --publish-version-file <file> Extra adjacent version file name for publish gating. Repeatable.");
-        Console.WriteLine("  --fail-if-affected            Exit 2 when affected items exist.");
-        Console.WriteLine("  --fail-if-none                Exit 3 when no affected items exist.");
+        Console.WriteLine("  --fail-if-affected            Exit 2 when selected targets exist.");
+        Console.WriteLine("  --fail-if-none                Exit 3 when no selected targets exist.");
         Console.WriteLine("  --allow-warnings              Continue successfully when analysis warnings are emitted.");
     }
 
@@ -410,9 +413,9 @@ internal static class Cli
 
         public string Format { get; set; } = "text";
 
-        public IncludeFilter Include { get; set; } = IncludeFilter.All;
+        public ActionTarget Target { get; set; } = ActionTarget.Deploy;
 
-        public bool IncludeSet { get; set; }
+        public bool TargetSet { get; set; }
 
         public string? OutputPath { get; set; }
 

@@ -59,7 +59,7 @@ public sealed class AutomationPolicyTests
         Assert.Equal("true", PropertyValue(document, "PackAsTool"));
         Assert.Equal("BicepAffected", PropertyValue(document, "PackageId"));
         Assert.Equal("bicep-affected", PropertyValue(document, "ToolCommandName"));
-        Assert.Equal("0.1.0-beta.2", PropertyValue(document, "Version"));
+        Assert.Equal("0.1.0-beta.3", PropertyValue(document, "Version"));
         Assert.Equal("MIT", PropertyValue(document, "PackageLicenseExpression"));
         Assert.Equal("https://github.com/Bandgren/bicep-affected", PropertyValue(document, "PackageProjectUrl"));
         Assert.Equal("https://github.com/Bandgren/bicep-affected.git", PropertyValue(document, "RepositoryUrl"));

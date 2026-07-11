@@ -1,19 +1,20 @@
 # GitHub Actions rollout examples
 
-These are secure, copyable patterns for consuming `bicep-affected`. They pin every action to an immutable full commit SHA, keep GitHub expressions out of shell source, pass values through environment variables, quote shell expansions, and never expose Azure credentials to pull-request validation.
+These examples consume the beta.3 actionable-output contract. They use JSON `schemaVersion: 3`, an explicit action `target`, and the canonical `.targets` array. The detector returns data only: each consuming repository retains the trusted mapping from an approved path to deployment scope, environment, credentials, registry, and command.
 
-The configuration example used by these workflows is validated by the root [configuration schema](../bicep-affected.schema.json). The analysis contract is JSON `schemaVersion: 2`; all graph and item kinds are strings, and the affected arrays are data—not commands to execute.
+Every action is pinned to an immutable commit SHA. GitHub expressions are passed through `env:` rather than embedded in shell source; every shell expansion is quoted. Analysis warnings fail closed by default, so a blocking job writes no payload when analysis reports a warning.
 
-## Security rules used below
+## Rules for a safe rollout
 
-- PR jobs have only `contents: read`. They validate syntax with `az bicep build`; they do not run `azure/login`, use Azure credentials, or publish.
-- A GitHub expression belongs in `env:` (or the workflow data model), not inside `run:`. Shell source consumes `"$VARIABLE"`.
-- Any workflow that builds this repository restores with `dotnet restore --locked-mode` before `--no-restore` build/test/pack commands. The consumer-only examples below install a prebuilt tool and therefore do not restore this repository.
-- `--allow-warnings` appears only in the named shadow job. Blocking jobs use the default fail-closed warning behavior.
-- The publish job is separately triggered, ref-checked, concurrency-serialized, and assigned a protected `production` environment. Put Azure and registry secrets only on that protected environment.
-- Diagnostics are written explicitly with `--output` and uploaded explicitly. They do not grant publication authority.
+- PR jobs use only `contents: read`; they must not use Azure credentials or publish.
+- Pin the tool version and install it from an explicit source until NuGet.org indexes it.
+- Validate `schemaVersion`, `target`, and the `.targets` type before reading any values.
+- Keep path-to-command mapping in a reviewed repository script. Do not construct shell source from detector output.
+- Blocking build, deployment, and publishing jobs must not pass `--allow-warnings`.
+- Retain a scheduled or manually dispatchable **full-validation fallback**. Run it when detection fails or emits warnings.
+- Keep publishing separately triggered, ref-checked, serialized, and protected by an environment. Put Azure and registry credentials only on that environment.
 
-Action pins used in every example:
+The immutable action pins in the examples are:
 
 ```yaml
 # actions/checkout v5
@@ -26,9 +27,9 @@ uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
 uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
 ```
 
-## Pull-request detection and syntax validation
+## Pull-request detection and build selection
 
-This workflow checks out full history, installs a pinned tool version, writes standard JSON to a file, and validates every affected entrypoint without Azure credentials. It parses the detector's JSON as data; it does not depend on a provider-specific step-output or matrix contract.
+An APIM policy edit can affect a deployment entrypoint through `loadTextContent`. This PR job asks for the `build` target, which includes affected entrypoints and affected publishable modules, then passes each path as data to a trusted validation script. The script must explicitly allow the received paths and choose its own command.
 
 ```yaml
 name: Validate affected Bicep
@@ -57,7 +58,7 @@ jobs:
 
       - name: Install detector
         env:
-          TOOL_VERSION: 0.1.0-beta.2
+          TOOL_VERSION: 0.1.0-beta.3
           TOOL_SOURCE: ${{ runner.temp }}/bicep-affected-tool
         shell: bash
         run: |
@@ -69,7 +70,7 @@ jobs:
             --version "$TOOL_VERSION" \
             --add-source "$TOOL_SOURCE"
 
-      - name: Detect and validate affected entrypoints
+      - name: Detect build targets and validate
         env:
           BASE_REF: ${{ github.base_ref }}
           REPORT: ${{ runner.temp }}/bicep-affected.json
@@ -78,14 +79,18 @@ jobs:
           bicep-affected affected \
             --repo "$GITHUB_WORKSPACE" \
             --from "origin/$BASE_REF" \
-            --to "HEAD" \
+            --to HEAD \
+            --target build \
             --format json \
             --output "$REPORT"
 
-          jq -e '.schemaVersion == 2 and (.entrypoints | type == "array")' "$REPORT" > /dev/null
-          while IFS= read -r bicep_path; do
-            az bicep build --file "$bicep_path" --stdout > /dev/null
-          done < <(jq -r '.entrypoints[] | .path' "$REPORT")
+          jq -e \
+            '.schemaVersion == 3 and .target == "build" and (.targets | type == "array")' \
+            "$REPORT" > /dev/null
+          jq -r '.targets[].path' "$REPORT" |
+            while IFS= read -r bicep_path; do
+              ./ci/validate-bicep-target.sh "$bicep_path"
+            done
 
       - name: Upload detector diagnostic
         if: always()
@@ -96,35 +101,48 @@ jobs:
           if-no-files-found: warn
 ```
 
-The report is parsed only after checking its schema version and expected array type. Values are read as data, stored in shell variables, and quoted at their command boundary; no JSON value is interpolated into shell source.
+`--output` writes the report only to `REPORT`; it does not duplicate rendered JSON to stdout. If warnings occur, the default failure happens before a report is written. The upload step remains diagnostic-only and cannot grant deployment authority.
 
-## Deployment selection
+## Deployment selection and causality review
 
-The affected entrypoint array is also the deployment selection contract. Literal content-load dependencies are traversed in reverse: if `deployments/employees/main.bicep` uses `loadTextContent('../../apis/employees/policy.xml')`, changing `apis/employees/policy.xml` places `deployments/employees/main.bicep` in `.entrypoints` with a `reverseDependency` reason and the full dependency chain.
-
-Keep deployment policy in a trusted repository script rather than accepting commands from detector output:
+Use `deploy` for entrypoint-only deployment selection. `explain` is useful during review: it prints selected targets plus each reason and reverse-dependency chain, while `affected` remains one path per line in text mode.
 
 ```yaml
-- name: Deploy affected entrypoints
+- name: Detect deploy targets
   env:
-    REPORT: ${{ runner.temp }}/bicep-affected.json
+    REPORT: ${{ runner.temp }}/bicep-deploy.json
   shell: bash
   run: |
-    jq -e '.schemaVersion == 2 and (.entrypoints | type == "array")' "$REPORT" > /dev/null
-    jq -r '.entrypoints[].path' "$REPORT" |
+    bicep-affected affected \
+      --repo "$GITHUB_WORKSPACE" \
+      --from "$BEFORE_SHA" \
+      --to "$AFTER_SHA" \
+      --target deploy \
+      --format json \
+      --output "$REPORT"
+    jq -e \
+      '.schemaVersion == 3 and .target == "deploy" and (.targets | type == "array")' \
+      "$REPORT" > /dev/null
+
+- name: Deploy approved targets
+  env:
+    REPORT: ${{ runner.temp }}/bicep-deploy.json
+  shell: bash
+  run: |
+    jq -r '.targets[].path' "$REPORT" |
       while IFS= read -r bicep_path; do
         ./ci/deploy-bicep.sh "$bicep_path"
       done
 ```
 
-`deploy-bicep.sh` must reject unknown paths and map approved entrypoints to their deployment scope, environment, parameter file, and credentials. Do not use `--allow-warnings` in this job: a warning may indicate an incomplete graph, so deployment selection must fail closed.
+`deploy-bicep.sh` must reject unknown paths and map known entrypoints to the appropriate scope, parameter file, and protected credentials. For a policy change such as `apis/employees/policy.xml`, `explain --target deploy` identifies the selected entrypoint and the content-load dependency chain that selected it.
 
-## Deliberate shadow rollout
+## Deliberate shadow comparison and fallback
 
-A shadow job may keep reporting when the detector emits warnings, while the established full-validation job remains authoritative. It must be visibly non-blocking and should have a finite removal plan. This is the only appropriate use of `--allow-warnings`:
+A shadow job may explicitly permit warnings only while an established full-validation job is authoritative:
 
 ```yaml
-- name: Shadow compare affected analysis
+- name: Shadow compare build selection
   continue-on-error: true
   env:
     BASE_REF: ${{ github.base_ref }}
@@ -134,25 +152,18 @@ A shadow job may keep reporting when the detector emits warnings, while the esta
     bicep-affected affected \
       --repo "$GITHUB_WORKSPACE" \
       --from "origin/$BASE_REF" \
-      --to "HEAD" \
+      --to HEAD \
+      --target build \
       --format json \
       --output "$SHADOW_REPORT" \
       --allow-warnings
-
-- name: Upload shadow report
-  if: always()
-  uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
-  with:
-    name: bicep-affected-shadow
-    path: ${{ runner.temp }}/bicep-affected-shadow.json
-    if-no-files-found: warn
 ```
 
-When detection fails or warns in a blocking rollout, run the existing full validation of every relevant Bicep file. Keep that scheduled or manually dispatchable fallback until affected results have been proven against it.
+Keep the existing complete Bicep validation runnable on schedule and by manual dispatch. A warning, detector failure, or questionable selection is a signal to use that full-validation fallback—not a reason to weaken a blocking job.
 
-## Protected publishing
+## Protected publish selection
 
-Publishing is a separate push/manual workflow, not a PR job. Manual dispatch requires an explicit trusted base revision to compare with the selected protected ref. Configure the `production` environment to require reviewers and restrict deployment branches. The Azure client ID, tenant ID, subscription ID, and registry name below must be protected environment secrets/variables. The publish loop parses only canonical JSON data and keeps every value quoted.
+Only the `publish` target selects affected publishable modules that have changed, readable configured version metadata. The protected workflow below preserves the detector's role as a data source and applies the registry mapping in the trusted workflow.
 
 ```yaml
 name: Publish affected Bicep modules
@@ -192,7 +203,7 @@ jobs:
           dotnet-version: 10.0.301
       - name: Install detector
         env:
-          TOOL_VERSION: 0.1.0-beta.2
+          TOOL_VERSION: 0.1.0-beta.3
           TOOL_SOURCE: ${{ runner.temp }}/bicep-affected-tool
         shell: bash
         run: |
@@ -203,7 +214,7 @@ jobs:
           dotnet tool install --global BicepAffected \
             --version "$TOOL_VERSION" \
             --add-source "$TOOL_SOURCE"
-      - name: Detect modules to publish
+      - name: Detect publish targets
         env:
           BEFORE_SHA: ${{ inputs.base_ref || github.event.before }}
           AFTER_SHA: ${{ github.sha }}
@@ -214,18 +225,12 @@ jobs:
             --repo "$GITHUB_WORKSPACE" \
             --from "$BEFORE_SHA" \
             --to "$AFTER_SHA" \
-            --include modules \
+            --target publish \
             --format json \
             --output "$REPORT"
-
-          jq -e '.schemaVersion == 2 and (.publishableModulesToPublish | type == "array")' "$REPORT" > /dev/null
-      - name: Upload publishing diagnostic
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
-        with:
-          name: bicep-publish-detection
-          path: ${{ runner.temp }}/bicep-publish-detection.json
-          if-no-files-found: warn
+          jq -e \
+            '.schemaVersion == 3 and .target == "publish" and (.targets | type == "array")' \
+            "$REPORT" > /dev/null
       - name: Azure login
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
         with:
@@ -238,7 +243,7 @@ jobs:
           REGISTRY: ${{ vars.BICEP_REGISTRY }}
         shell: bash
         run: |
-          jq -c '.publishableModulesToPublish[]' "$REPORT" |
+          jq -c '.targets[]' "$REPORT" |
             while IFS= read -r module; do
               bicep_path="$(jq -r '.path' <<< "$module")"
               module_directory="$(jq -r '.directory' <<< "$module")"
@@ -251,4 +256,4 @@ jobs:
             done
 ```
 
-The sample does not contain a `buildCommand`, provider-specific matrix, or unquoted data interpolation. Consumers decide their own build/publish command from the canonical JSON fields and their trusted workflow policy.
+Configure `production` to require reviewers and restrict deployment branches. Keep Azure identity and registry configuration in that protected environment. The workflow validates the payload before parsing, quotes every data boundary, and never treats a returned value as shell code.

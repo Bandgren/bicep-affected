@@ -5,22 +5,21 @@ namespace BicepAffected.Cli.Output;
 
 internal static class TextRenderer
 {
-    public static string Render(AffectedResult result)
+    public static string RenderAffected(ActionSelection selection)
+    {
+        return string.Join(Environment.NewLine, selection.Targets.Select(item => item.Path));
+    }
+
+    public static string RenderExplain(ActionSelection selection)
     {
         var builder = new StringBuilder();
-
-        AppendSection(builder, "Changed files", result.ChangedFiles);
-        AppendAffectedSection(builder, "Affected entrypoints", result.Entrypoints);
-        AppendAffectedSection(builder, "Affected publishable modules", result.PublishableModules);
-        AppendAffectedSection(builder, "Affected helpers", result.Helpers);
-
-        if (result.Entrypoints.Count == 0 && result.PublishableModules.Count == 0 && result.Helpers.Count == 0)
+        AppendSection(builder, "Changed files", selection.ChangedFiles);
+        AppendActionTargetSection(builder, $"Selected {selection.Target.ToString().ToLowerInvariant()} targets", selection.Targets);
+        if (selection.Targets.Count == 0)
         {
-            builder.AppendLine("No affected Bicep files found.");
+            builder.AppendLine("No action targets selected.");
             builder.AppendLine();
         }
-
-        AppendSection(builder, "Warnings", result.Warnings);
 
         return builder.ToString().TrimEnd();
     }
@@ -35,7 +34,7 @@ internal static class TextRenderer
         return builder.ToString().TrimEnd();
     }
 
-    private static void AppendAffectedSection(StringBuilder builder, string title, IReadOnlyList<AffectedItem> items)
+    private static void AppendActionTargetSection(StringBuilder builder, string title, IReadOnlyList<ActionItem> items)
     {
         if (items.Count == 0)
         {
@@ -43,13 +42,10 @@ internal static class TextRenderer
         }
 
         builder.AppendLine($"{title}:");
-        foreach (var item in items.OrderBy(item => item.Path, StringComparer.Ordinal).ThenBy(item => item.Kind))
+        foreach (var item in items)
         {
             builder.AppendLine($"  {item.Path}");
-            foreach (var reason in item.Reasons
-                .OrderBy(reason => reason.Kind, StringComparer.Ordinal)
-                .ThenBy(reason => reason.CausedBy, StringComparer.Ordinal)
-                .ThenBy(reason => reason.Message, StringComparer.Ordinal))
+            foreach (var reason in item.Reasons)
             {
                 builder.AppendLine($"    reason: {reason.Message} caused by {reason.CausedBy}");
                 builder.AppendLine($"    chain: {string.Join(" -> ", reason.Chain)}");

@@ -12,7 +12,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>bicep-affected</ToolCommandName>
     <PackageId>BicepAffected</PackageId>
-    <Version>0.1.0-beta.2</Version>
+    <Version>0.1.0-beta.3</Version>
     <Authors>bicep-affected contributors</Authors>
     <Description>Find Bicep files, entrypoints, and publishable modules affected by changed files.</Description>
     <PackageTitle>BicepAffected</PackageTitle>
@@ -21,7 +21,7 @@
     <PackageProjectUrl>https://github.com/Bandgren/bicep-affected</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Bandgren/bicep-affected.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageReleaseNotes>Removes the GitHub-specific output format in favor of default text and provider-neutral JSON schema v2.</PackageReleaseNotes>
+    <PackageReleaseNotes>Breaking: affected emits one affected path per line; explain reports selected targets, reasons, and chains; --target build|deploy|publish (default deploy) selects target modes; JSON uses schema v3; and --output writes only the output file.</PackageReleaseNotes>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <PackageReadmeFile>README.md</PackageReadmeFile>

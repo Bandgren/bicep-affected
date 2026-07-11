@@ -1,39 +1,30 @@
 # CLI and implementation review
 
-This is a historical review record updated after the production-hardening work. It distinguishes conclusions that are now resolved from current operational boundaries; it is not a backlog or a proposal for unimplemented work.
+This review records the current beta.3 operational contract. Earlier beta.2 conclusions described below as superseded are historical only and must not guide consumers.
 
-## Current conclusion
+## Current supported contract
 
-The supported contract is intentionally narrow and strict:
+- `affected` selects actionable paths; text output is exactly one selected path per line.
+- `explain` uses the same selection and reports changed files, selected targets, reasons, and complete dependency chains.
+- `graph` reports topology and has no changed-file or action-target selection input.
+- `affected` and `explain` accept exactly one changed-file mode: repeatable `--changed-file`, line-oriented `--changed-files-stdin`, or a complete `--from`/`--to` Git range.
+- `--target build|deploy|publish` selects action class, defaulting to `deploy`. Build selects entrypoints and affected modules; deploy selects entrypoints; publish selects only version-gated affected modules.
+- Affected JSON is data-only `schemaVersion: 3`: `target`, `hasTargets`, `targetCount`, `changedFiles`, `targets`, and `warnings`. Consumers select from `.targets`, after validating schema version and target.
+- Graph JSON remains `schemaVersion: 1`, with deterministic nodes, edges, warnings, and parse-diagnostic files.
+- Warnings fail closed with exit 1 before affected/explain payload emission unless a deliberately non-blocking caller supplies `--allow-warnings`. Warnings remain visible on stderr.
+- `--output` writes rendered output only to the requested file; it does not duplicate a rendered payload to stdout.
+- Unknown options, incomplete ranges, invalid target names, and invalid adjacent version-file names are errors. Configuration and repository paths remain strict and contained.
 
-- `affected` accepts exactly one changed-file mode: repeatable explicit paths, line-oriented stdin, or a complete `--from`/`--to` Git range.
-- `graph` does not accept affected-only input, include, publish, or fail-policy flags; it does accept `--allow-warnings` so graph-extraction warnings can be handled with the same explicit policy.
-- Unknown options, invalid formats, invalid includes, incomplete ranges, and invalid adjacent version-file names are errors.
-- Analysis warnings fail closed with exit 1 unless a caller deliberately supplies `--allow-warnings`; warnings remain visible.
-- JSON and graph JSON use `schemaVersion: 2`, string kinds, deterministic ordering, and data-only fields. There is no `buildCommand` in the current payload.
-- Configuration is strict: unknown members, non-array collections, and null collection entries are rejected; omitted versus explicitly empty arrays retain their documented distinct meanings.
-- Repository/config/dependency paths are constrained to the repository and checked against traversal and symlink escape.
+## Output and safety boundaries
 
-The [README](../README.md) is the user-facing specification; the root [JSON Schema](../bicep-affected.schema.json) is the strict configuration contract.
+The tool returns paths and metadata, never deployment/build/publish commands. A consuming workflow owns the trusted allowlist and mapping from a selected path to scope, parameters, credentials, registry, and executable command. A warning signals that graph completeness is uncertain; blocking validation, deployment, and publishing must use the default fail-closed behavior.
 
-## Resolved historical findings
+An empty textual `affected` result contains no lines. The JSON result remains explicit: `hasTargets` is `false`, `targetCount` is `0`, and `targets` is `[]`. `--fail-if-affected` exits 2 when selected targets exist; `--fail-if-none` exits 3 when none exist, except that unallowed warnings take precedence.
 
-| Historical concern | Current status |
-| --- | --- |
-| Changed-file modes could drift or be combined accidentally | **Resolved.** Exactly-one input-mode validation is enforced. |
-| Git paths were rewritten or unsafe repository reads were possible | **Resolved.** Raw Git path spelling is preserved and repository containment/symlink checks are enforced. |
-| Warnings could silently permit a CI pass | **Resolved.** Warnings fail closed by default; `--allow-warnings` is explicit. |
-| CLI/output behavior lacked a stable machine contract | **Resolved.** Schema version 2, string kinds, deterministic fields, and regression coverage define the JSON contract. |
-| Generic payloads contained executable build instructions | **Resolved.** Output is data-only; consumers apply their own trusted workflow policy. |
-| YAML/Azure DevOps output was implied | **Resolved.** The supported formats are text and JSON. No provider-specific matrix, Azure matrix, or YAML output contract is claimed. |
+## Superseded beta.2 assumptions
 
-## Current operational boundaries
-
-- Local registry/template-spec dependencies are external references; they are not resolved back to source files in a different repository.
-- Analysis models the supported local Bicep syntax and literal content-load paths. A warning is a safety signal, not a result to ignore in a blocking workflow.
-- A changed publishable module appears in `publishableModulesToPublish` only when an adjacent configured publish-version file changed and valid version metadata can be read.
-- `--output` writes the rendered text or JSON payload to a file for both `affected` and `graph`.
+The following are explicitly superseded by beta.3: category-specific output arrays as an automation contract, affected JSON schema version 2, explanatory default `affected` text, the old selector option, and stdout duplication when using `--output`. Current consumers must use beta.3 `--target`, `explain`, and `.targets` instead.
 
 ## Review outcome
 
-Use affected analysis as a production gate only with the documented warning policy and a retained full-validation fallback. Shadow comparisons may use `--allow-warnings` temporarily; normal validation and publishing must remain fail closed.
+Use affected selection as a production gate only with a pinned tool version, schema/target validation, an allowlisted consumer-side mapping, and a retained full-validation fallback. A shadow comparison may opt into `--allow-warnings`; normal validation and publishing must not.

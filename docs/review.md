@@ -1,36 +1,36 @@
 # Implementation review record
 
-This document preserves the review conclusions that informed the hardened implementation. Status labels are current: **resolved** means the shipped contract addresses the finding; **current boundary** means an intentional limitation with documented operational handling. None of the entries below is a promise of future work.
+This document states the shipped beta.3 contract and the operating response to its intentional boundaries. References to beta.2 behavior are explicitly marked superseded rather than retained as current guidance.
 
 ## Resolved conclusions
 
 | Review area | Current status |
 | --- | --- |
-| Deleted/renamed and explicit changed-path handling | **Resolved contract.** Changed-file inputs are validated strictly, preserve raw Git path spelling, and are analyzed conservatively within repository containment rules. |
-| Parameter-file impact | **Resolved contract.** `.bicepparam` and conventional parameter-file relationships are part of affected analysis. |
-| CI-native output | **Resolved contract.** Default text and optional JSON output are supported. JSON is schema version 2, deterministic, and data-only. |
-| Path casing and containment | **Resolved contract.** Path comparison follows the supported platform behavior, while traversal, empty/NUL input, and physical symlink escape are rejected. |
-| Metadata failures | **Resolved contract.** Metadata/version problems surface as warnings; warnings fail closed unless explicitly allowed for a shadow rollout. |
-| CLI/output regression coverage | **Resolved contract.** The command, exit, configuration, output, and automation contracts are regression-tested. |
-| Artifact-name safety | **Resolved contract.** Artifact names are deterministic path-derived names with a SHA-256 suffix, not executable commands. |
-| Workflow hardening | **Resolved contract.** Examples use immutable action SHAs, quoted environment boundaries, explicit diagnostics, unprivileged PR validation, and protected publishing. |
+| Changed-file input | Exactly one supported input mode is validated; raw Git path spelling is preserved and paths are constrained to the repository. |
+| Parameter and content dependencies | Supported Bicep parameter relationships and literal content-load reverse dependencies participate in affected analysis. |
+| Actionable selection | `--target build|deploy|publish` selects a deterministic `.targets` list; default target is `deploy`. |
+| Causality | `explain` shows changed files, selected targets, reason messages, and complete dependency chains. |
+| Machine contract | Affected JSON uses data-only `schemaVersion: 3` with `target`, `hasTargets`, `targetCount`, `changedFiles`, `targets`, and `warnings`. |
+| Graph contract | Graph JSON remains data-only `schemaVersion: 1`; it is topology, not action selection. |
+| Warning policy | Warnings are visible on stderr and fail closed before affected/explain payload emission unless explicitly allowed for a non-blocking shadow comparison. |
+| Output-file policy | `--output` writes only the rendered output file; it does not duplicate rendered output to stdout. |
+| Workflow hardening | Consumer examples pin tools/actions, quote data boundaries, retain trusted mappings, keep PRs unprivileged, and protect publishing environments. |
 
 ## Current boundaries and required response
 
 | Boundary | Required response |
 | --- | --- |
-| Registry and template-spec references point outside the repository | Treat them as external; validate the consuming repository when its reference changes. |
-| The analyzer emits a warning or fails | Use the full-validation fallback. Do not weaken a blocking job with `--allow-warnings`. |
-| A new tool version is introduced | Pin it, run a non-blocking shadow comparison, then promote only after comparison with full validation. |
-| A regression is discovered after promotion | Roll back to the last known-good pinned tool version and re-enable full validation while investigating. |
-| A module is affected without an adjacent configured version-file change | It remains out of `publishableModulesToPublish`; decide and make the version change through the normal release process. |
+| Registry/template-spec dependency points outside the repository | Treat it as external and validate the consuming repository when its reference changes. |
+| Detector warns or fails | Run the retained full-validation fallback; do not weaken blocking work with `--allow-warnings`. |
+| A selected path must be built, deployed, or published | Validate schema/target first, then map the path using a reviewed repository-owned allowlist and command policy. |
+| Publish target is empty | Do not publish; version metadata must change and be readable for a module to be selected. |
+| Tool upgrade | Pin it, compare in a non-blocking shadow run, then promote only after comparison with full validation. |
+| Regression after promotion | Roll back to the last known-good pin and re-enable full validation while investigating. |
 
-## Output contract conclusions
+## Superseded beta.2 record
 
-`affected --format json` and `graph --format json` both declare `schemaVersion: 2`. Node, item, and dependency kinds are strings. The affected payload contains canonical affected arrays rather than provider-specific matrix wrappers; consumers must not look for or execute a `buildCommand`, and no YAML, Azure DevOps, or GitHub Actions output contract exists.
+Beta.2 affected JSON schema version 2, category arrays as an action contract, explanatory default affected text, the old include selector, and stdout duplication with `--output` are superseded. They must not be used in production automation. Current workflows validate beta.3 and iterate `.targets`.
 
-The configuration file is an object with only `entrypoints`, `helpers`, `publishableModules`, and `globalImpactFiles`. See the root [strict schema](../bicep-affected.schema.json) and the [README configuration example](../README.md#configuration). Omitted collections select runtime defaults; explicit empty arrays deliberately select no values for that collection.
+## Review outcome
 
-## Historical note
-
-Earlier review text described missing output features, a future Azure matrix, an executable `buildCommand`, relaxed warning behavior, and clear-text package-token storage. Those conclusions are superseded and must not be used as operating guidance. The current README and workflow/publishing documents are authoritative.
+Affected analysis is a production gate only when warnings remain fail closed, output is interpreted as data rather than executable policy, and a complete validation fallback remains available.

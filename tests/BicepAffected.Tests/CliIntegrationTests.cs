@@ -7,217 +7,281 @@ public sealed class CliIntegrationTests : IDisposable
 {
     private readonly List<string> tempPaths = [];
 
-    [Fact]
-    public void Affected_json_outputs_valid_ci_payload()
+    [Theory]
+    [InlineData("apis/employees/policy.xml")]
+    [InlineData("apis/employees/policy.bin")]
+    [InlineData("apis/employees/scripts/deploy.ps1")]
+    public void Affected_deploy_selects_entrypoint_for_loaded_content(string changedFile)
     {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--format", "json");
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", changedFile);
 
         Assert.Equal(0, result.ExitCode);
-        using var document = JsonDocument.Parse(result.StdOut);
-        Assert.True(document.RootElement.GetProperty("hasAffected").GetBoolean());
-        Assert.Equal("deployments/employees/main.bicep", document.RootElement.GetProperty("entrypoints")[0].GetProperty("path").GetString());
+        Assert.Equal($"deployments/employees/main.bicep{Environment.NewLine}", result.StdOut);
+        Assert.Empty(result.StdErr);
     }
 
     [Fact]
-    public void Affected_without_format_outputs_human_readable_text()
+    public void Affected_deploy_excludes_nonmatching_directory_content()
     {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml");
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/scripts/ignored.txt");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Changed files:\n  apis/employees/openapi.yaml", result.StdOut, StringComparison.Ordinal);
-        Assert.Contains("Affected entrypoints:\n  deployments/employees/main.bicep", result.StdOut, StringComparison.Ordinal);
-        Assert.Contains("reason: Affected through content-load dependency. caused by apis/employees/openapi.yaml", result.StdOut, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"schemaVersion\"", result.StdOut, StringComparison.Ordinal);
+        Assert.Empty(result.StdOut);
+        Assert.Empty(result.StdErr);
     }
 
     [Fact]
-    public void Fail_if_none_returns_exit_code_three()
+    public void Affected_deploy_selects_entrypoint_for_transitive_local_module()
     {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/unreferenced.yaml", "--fail-if-none");
-
-        Assert.Equal(3, result.ExitCode);
-    }
-
-    [Fact]
-    public void Fail_if_affected_returns_exit_code_two()
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--fail-if-affected");
-
-        Assert.Equal(2, result.ExitCode);
-    }
-
-    [Fact]
-    public void Changed_files_stdin_reads_paths()
-    {
-        var result = RunCliWithInput("apis/employees/openapi.yaml\n", "affected", "--repo", FixturePaths.Root("monorepo"), "--changed-files-stdin", "--format", "json");
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "infra/shared/tags.bicep");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("deployments/employees/main.bicep", result.StdOut, StringComparison.Ordinal);
+        Assert.Equal($"deployments/employees/main.bicep{Environment.NewLine}", result.StdOut);
     }
 
     [Fact]
-    public void Output_writes_rendered_payload_to_file()
+    public void Affected_deploy_selects_direct_entrypoint()
     {
-        var outputPath = CreateTempPath("affected.json");
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--format", "json", "--output", outputPath, "--allow-warnings");
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "deployments/employees/main.bicep");
+
         Assert.Equal(0, result.ExitCode);
-        Assert.True(File.Exists(outputPath));
-        Assert.Contains("deployments/employees/main.bicep", File.ReadAllText(outputPath), StringComparison.Ordinal);
+        Assert.Equal($"deployments/employees/main.bicep{Environment.NewLine}", result.StdOut);
     }
 
+    [Fact]
+    public void Affected_empty_deploy_selection_succeeds_with_empty_text_output()
+    {
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/unreferenced.yaml");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StdOut);
+        Assert.Empty(result.StdErr);
+    }
 
     [Fact]
-    public void Publish_version_file_option_outputs_publish_metadata_as_json()
+    public void Affected_build_includes_standalone_publishable_module_while_deploy_excludes_it()
     {
-        var result = RunCli(
-            "affected",
-            "--repo",
-            FixturePaths.Root("modules-repo"),
-            "--changed-file",
-            "Function/Infrastructure/version.json",
-            "--publish-version-file",
-            "version.json",
-            "--format",
-            "json",
-            "--include",
-            "modules",
+        var deploy = RunCli(
+            "affected", "--repo", FixturePaths.Root("modules-repo"),
+            "--changed-file", "Function/Infrastructure/functionWithoutSlot.bicep",
             "--allow-warnings");
+        var build = RunCli(
+            "affected", "--repo", FixturePaths.Root("modules-repo"),
+            "--changed-file", "Function/Infrastructure/functionWithoutSlot.bicep",
+            "--target", "build", "--allow-warnings");
 
-        Assert.Equal(0, result.ExitCode);
-        using var document = JsonDocument.Parse(result.StdOut);
-        var module = Assert.Single(document.RootElement.GetProperty("publishableModulesToPublish").EnumerateArray());
-        Assert.Equal("Function/Infrastructure/functionWithoutSlot.bicep", module.GetProperty("path").GetString());
-        Assert.Equal("Function/Infrastructure/version.json", module.GetProperty("versionFile").GetString());
-        Assert.Equal("2.1.0-preview", module.GetProperty("version").GetString());
-        Assert.Equal("v2.1.0-preview", module.GetProperty("versionTag").GetString());
-        Assert.False(document.RootElement.TryGetProperty("matrix", out _));
-        Assert.False(document.RootElement.TryGetProperty("publishMatrix", out _));
-    }
-
-    [Theory]
-    [InlineData("github")]
-    [InlineData("yaml")]
-    [InlineData("azure-devops")]
-    public void Unsupported_formats_fail(string format)
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--format", format);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("--format must be one of: text, json.", result.StdErr, StringComparison.Ordinal);
+        Assert.Equal(0, deploy.ExitCode);
+        Assert.Empty(deploy.StdOut);
+        Assert.Equal(0, build.ExitCode);
+        Assert.Equal($"Function/Infrastructure/functionWithoutSlot.bicep{Environment.NewLine}", build.StdOut);
     }
 
     [Fact]
-    public void Graph_rejects_affected_only_options()
+    public void Affected_publish_requires_changed_valid_adjacent_metadata()
     {
-        var result = RunCli("graph", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml");
+        var noMetadataChange = RunCli(
+            "affected", "--repo", FixturePaths.Root("modules-repo"),
+            "--changed-file", "Function/Infrastructure/functionWithoutSlot.bicep",
+            "--target", "publish", "--allow-warnings");
+        var metadataChange = RunCli(
+            "affected", "--repo", FixturePaths.Root("modules-repo"),
+            "--changed-file", "Function/Infrastructure/metadata.json",
+            "--target", "publish", "--allow-warnings");
 
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("The graph command does not support: --changed-file", result.StdErr, StringComparison.Ordinal);
+        Assert.Equal(0, noMetadataChange.ExitCode);
+        Assert.Empty(noMetadataChange.StdOut);
+        Assert.Equal(0, metadataChange.ExitCode);
+        Assert.Equal($"Function/Infrastructure/functionWithoutSlot.bicep{Environment.NewLine}", metadataChange.StdOut);
     }
 
     [Fact]
-    public void Graph_supports_output_file()
-    {
-        var outputPath = CreateTempPath("graph.json");
-        var result = RunCli("graph", "--repo", FixturePaths.Root("monorepo"), "--format", "json", "--output", outputPath, "--allow-warnings");
-        Assert.Equal(0, result.ExitCode);
-        Assert.True(File.Exists(outputPath));
-        Assert.Contains("deployments/employees/main.bicep", File.ReadAllText(outputPath), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Changed_file_modes_cannot_be_combined()
-    {
-        var result = RunCliWithInput(
-            "apis/employees/openapi.yaml\n",
-            "affected",
-            "--repo",
-            FixturePaths.Root("monorepo"),
-            "--changed-file",
-            "apis/employees/openapi.yaml",
-            "--changed-files-stdin");
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Specify exactly one changed-file mode", result.StdErr, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("--from", "HEAD")]
-    [InlineData("--to", "HEAD")]
-    public void Partial_git_refs_are_rejected(string option, string value)
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), option, value);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("--from and --to must be supplied together", result.StdErr, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Empty_changed_files_stdin_is_authoritative()
-    {
-        var result = RunCliWithInput(string.Empty, "affected", "--repo", FixturePaths.Root("monorepo"), "--changed-files-stdin", "--fail-if-none");
-
-        Assert.Equal(3, result.ExitCode);
-    }
-
-    [Fact]
-    public void Warnings_fail_by_default_and_are_emitted_in_json()
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("malformed-repo"), "--changed-file", "unrelated.txt", "--format", "json");
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("warning: Parse diagnostic", result.StdErr, StringComparison.Ordinal);
-        using var document = JsonDocument.Parse(result.StdOut);
-        Assert.NotEmpty(document.RootElement.GetProperty("warnings").EnumerateArray());
-    }
-
-    [Fact]
-    public void Allow_warnings_preserves_analysis_payload_and_succeeds()
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("malformed-repo"), "--changed-file", "unrelated.txt", "--format", "json", "--allow-warnings");
-
-        Assert.Equal(0, result.ExitCode);
-        using var document = JsonDocument.Parse(result.StdOut);
-        Assert.NotEmpty(document.RootElement.GetProperty("warnings").EnumerateArray());
-    }
-
-    [Theory]
-    [InlineData("../version.json")]
-    [InlineData("nested/version.json")]
-    [InlineData(".")]
-    public void Publish_version_file_must_be_an_adjacent_filename(string versionFile)
-    {
-        var result = RunCli("affected", "--repo", FixturePaths.Root("modules-repo"), "--changed-file", "Function/Infrastructure/version.json", "--publish-version-file", versionFile);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("--publish-version-file must be a simple adjacent filename", result.StdErr, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Invalid_semver_metadata_warns_and_fails_closed()
+    public void Affected_publish_invalid_metadata_warns_and_fails_before_payload()
     {
         var repoRoot = CreateTempRepository("modules-repo");
-        File.WriteAllText(Path.Combine(repoRoot, "Function", "Infrastructure", "version.json"), """{"version":"1.02.3"}""");
+        File.WriteAllText(
+            Path.Combine(repoRoot, "Function", "Infrastructure", "metadata.json"),
+            """[{"name":"functionWithoutSlot","version":"1.02.3"}]""");
+        var outputPath = CreateTempPath("publish.json");
 
         var result = RunCli(
-            "affected",
-            "--repo",
-            repoRoot,
-            "--changed-file",
-            "Function/Infrastructure/version.json",
-            "--publish-version-file",
-            "version.json",
-            "--include",
-            "modules",
-            "--format",
-            "json");
+            "affected", "--repo", repoRoot,
+            "--changed-file", "Function/Infrastructure/metadata.json",
+            "--target", "publish", "--format", "json", "--output", outputPath);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("does not contain a valid SemVer version", result.StdErr, StringComparison.Ordinal);
+        Assert.Empty(result.StdOut);
+        Assert.False(File.Exists(outputPath));
+        Assert.Contains("warning:", result.StdErr, StringComparison.Ordinal);
+        Assert.Contains("valid SemVer", result.StdErr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Affected_publish_json_includes_changed_version_metadata()
+    {
+        var result = RunCli(
+            "affected", "--repo", FixturePaths.Root("modules-repo"),
+            "--changed-file", "Function/Infrastructure/metadata.json",
+            "--target", "publish", "--format", "json", "--allow-warnings");
+
+        Assert.Equal(0, result.ExitCode);
         using var document = JsonDocument.Parse(result.StdOut);
-        Assert.Contains(
-            document.RootElement.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()),
-            warning => warning?.Contains("does not contain a valid SemVer version", StringComparison.Ordinal) == true);
+        var payload = document.RootElement;
+        Assert.Equal(3, payload.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("publish", payload.GetProperty("target").GetString());
+        Assert.True(payload.GetProperty("hasTargets").GetBoolean());
+        Assert.Equal(1, payload.GetProperty("targetCount").GetInt32());
+        var target = Assert.Single(payload.GetProperty("targets").EnumerateArray());
+        Assert.Equal("Function/Infrastructure/functionWithoutSlot.bicep", target.GetProperty("path").GetString());
+        Assert.Equal("Function/Infrastructure/metadata.json", target.GetProperty("versionFile").GetString());
+        Assert.Equal("1.0.0-beta", target.GetProperty("version").GetString());
+        Assert.Equal("v1.0.0-beta", target.GetProperty("versionTag").GetString());
+        Assert.True(target.GetProperty("hasVersionChange").GetBoolean());
+    }
+
+    [Fact]
+    public void Affected_publish_invalid_metadata_with_allow_warnings_emits_empty_json_targets_and_warning()
+    {
+        var repoRoot = CreateTempRepository("modules-repo");
+        Directory.Delete(Path.Combine(repoRoot, "Invalid"), recursive: true);
+        File.WriteAllText(
+            Path.Combine(repoRoot, "Function", "Infrastructure", "metadata.json"),
+            """[{"name":"functionWithoutSlot","version":"1.02.3"}]""");
+
+        var result = RunCli(
+            "affected", "--repo", repoRoot,
+            "--changed-file", "Function/Infrastructure/metadata.json",
+            "--target", "publish", "--format", "json", "--allow-warnings");
+
+        Assert.Equal(0, result.ExitCode);
+        using var document = JsonDocument.Parse(result.StdOut);
+        var payload = document.RootElement;
+        Assert.Equal(3, payload.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("publish", payload.GetProperty("target").GetString());
+        Assert.False(payload.GetProperty("hasTargets").GetBoolean());
+        Assert.Equal(0, payload.GetProperty("targetCount").GetInt32());
+        Assert.Empty(payload.GetProperty("targets").EnumerateArray());
+        var warning = Assert.Single(payload.GetProperty("warnings").EnumerateArray()).GetString();
+        Assert.Equal(
+            "Changed publish version metadata 'Function/Infrastructure/metadata.json' for module 'Function/Infrastructure/functionWithoutSlot.bicep' does not contain a valid SemVer version.",
+            warning);
+        Assert.Equal($"warning: {warning}{Environment.NewLine}", result.StdErr);
+    }
+
+    [Fact]
+    public void Affected_json_uses_v3_selected_target_schema_and_is_deterministic()
+    {
+        var first = RunCli(
+            "affected", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "deployments/employees/main.bicep",
+            "--changed-file", "apis/employees/openapi.yaml",
+            "--format", "json");
+        var second = RunCli(
+            "affected", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "apis/employees/openapi.yaml",
+            "--changed-file", "deployments/employees/main.bicep",
+            "--format", "json");
+
+        Assert.Equal(0, first.ExitCode);
+        Assert.Equal(first.StdOut, second.StdOut);
+        using var document = JsonDocument.Parse(first.StdOut);
+        var payload = document.RootElement;
+        Assert.Equal(3, payload.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("deploy", payload.GetProperty("target").GetString());
+        Assert.True(payload.GetProperty("hasTargets").GetBoolean());
+        Assert.Equal(1, payload.GetProperty("targetCount").GetInt32());
+        Assert.Equal(
+            ["apis/employees/openapi.yaml", "deployments/employees/main.bicep"],
+            payload.GetProperty("changedFiles").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(
+            ["deployments/employees/main.bicep"],
+            payload.GetProperty("targets").EnumerateArray().Select(item => item.GetProperty("path").GetString()));
+        Assert.False(payload.TryGetProperty("entrypoints", out _));
+        Assert.False(payload.TryGetProperty("publishableModulesToPublish", out _));
+    }
+
+    [Fact]
+    public void Explain_renders_selected_targets_reasons_and_dependency_chains()
+    {
+        var result = RunCli(
+            "explain", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "apis/employees/openapi.yaml");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Changed files:", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("Selected deploy targets:", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("deployments/employees/main.bicep", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("reason:", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("chain: apis/employees/openapi.yaml -> deployments/employees/main.bicep", result.StdOut, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Graph_topology_schema_remains_unchanged()
+    {
+        var result = RunCli("graph", "--repo", FixturePaths.Root("monorepo"), "--format", "json");
+
+        Assert.Equal(0, result.ExitCode);
+        using var document = JsonDocument.Parse(result.StdOut);
+        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.True(document.RootElement.TryGetProperty("nodes", out _));
+        Assert.True(document.RootElement.TryGetProperty("edges", out _));
+    }
+
+    [Fact]
+    public void Output_file_receives_payload_and_suppresses_stdout()
+    {
+        var outputPath = CreateTempPath("affected.json");
+        var result = RunCli(
+            "affected", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "apis/employees/openapi.yaml",
+            "--format", "json", "--output", outputPath);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StdOut);
+        Assert.Empty(result.StdErr);
+        using var document = JsonDocument.Parse(File.ReadAllText(outputPath));
+        Assert.Equal("deployments/employees/main.bicep", document.RootElement.GetProperty("targets")[0].GetProperty("path").GetString());
+    }
+
+    [Fact]
+    public void Warnings_fail_closed_before_writing_payload()
+    {
+        var outputPath = CreateTempPath("affected.json");
+        var result = RunCli(
+            "affected", "--repo", FixturePaths.Root("malformed-repo"),
+            "--changed-file", "unrelated.txt",
+            "--format", "json", "--output", outputPath);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(result.StdOut);
+        Assert.False(File.Exists(outputPath));
+        Assert.Contains("warning: Parse diagnostic", result.StdErr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Include_is_rejected_as_removed_option()
+    {
+        var result = RunCli(
+            "affected", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "apis/employees/openapi.yaml",
+            "--include", "entrypoints");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Unknown option '--include'", result.StdErr, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("all")]
+    [InlineData("entrypoints")]
+    [InlineData("unknown")]
+    public void Target_requires_build_deploy_or_publish(string target)
+    {
+        var result = RunCli(
+            "affected", "--repo", FixturePaths.Root("monorepo"),
+            "--changed-file", "apis/employees/openapi.yaml",
+            "--target", target);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("--target must be one of: build, deploy, publish.", result.StdErr, StringComparison.Ordinal);
     }
 
     public void Dispose()
@@ -241,6 +305,7 @@ public sealed class CliIntegrationTests : IDisposable
         tempPaths.Add(path);
         return path;
     }
+
     private string CreateTempRepository(string fixtureName)
     {
         var destination = Path.Combine(Path.GetTempPath(), $"bicep-affected-{Guid.NewGuid():N}");
@@ -263,16 +328,7 @@ public sealed class CliIntegrationTests : IDisposable
         }
     }
 
-
-    private static CliRunResult RunCli(params string[] args)
-    {
-        return RunCli(args, input: null);
-    }
-
-    private static CliRunResult RunCliWithInput(string input, params string[] args)
-    {
-        return RunCli(args, input);
-    }
+    private static CliRunResult RunCli(params string[] args) => RunCli(args, input: null);
 
     private static CliRunResult RunCli(string[] args, string? input = null)
     {
@@ -298,7 +354,6 @@ public sealed class CliIntegrationTests : IDisposable
         {
             startInfo.ArgumentList.Add(arg);
         }
-
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start CLI process.");
         if (input is not null)
