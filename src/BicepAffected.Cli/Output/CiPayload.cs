@@ -18,8 +18,6 @@ internal sealed record CiPayload(
     IReadOnlyList<CiAffectedItem> PublishableModulesToPublish,
     IReadOnlyList<CiAffectedItem> PublishableModulesWithoutVersionChange,
     IReadOnlyList<CiAffectedItem> Helpers,
-    GitHubMatrix GitHubMatrix,
-    GitHubMatrix PublishMatrix,
     IReadOnlyList<string> Warnings)
 {
     public static CiPayload FromResult(
@@ -48,11 +46,10 @@ internal sealed record CiPayload(
         var helpers = OrderItems(result.Helpers.Select(item => CiAffectedItem.FromAffectedItem(item, PublishVersionMetadata.Empty)));
         var publishModules = OrderItems(modules.Where(item => item.HasVersionChange));
         var modulesWithoutVersionChange = OrderItems(modules.Where(item => !item.HasVersionChange));
-        var matrixItems = OrderItems(entrypoints.Concat(modules));
 
         return new CiPayload(
-            SchemaVersion: 1,
-            HasAffected: matrixItems.Length > 0 || helpers.Length > 0,
+            SchemaVersion: 2,
+            HasAffected: entrypoints.Length > 0 || modules.Length > 0 || helpers.Length > 0,
             HasPublishableModulesToPublish: publishModules.Length > 0,
             Counts: new CiCounts(entrypoints.Length, modules.Length, helpers.Length),
             ChangedFiles: result.ChangedFiles.OrderBy(path => path, StringComparer.Ordinal).ToArray(),
@@ -61,8 +58,6 @@ internal sealed record CiPayload(
             PublishableModulesToPublish: publishModules,
             PublishableModulesWithoutVersionChange: modulesWithoutVersionChange,
             Helpers: helpers,
-            GitHubMatrix: new GitHubMatrix(matrixItems),
-            PublishMatrix: new GitHubMatrix(publishModules),
             Warnings: result.Warnings
                 .Concat(modulePayloads.SelectMany(module => module.Metadata.Warnings))
                 .Distinct(StringComparer.Ordinal)
@@ -78,7 +73,6 @@ internal sealed record CiPayload(
 }
 internal sealed record CiCounts(int Entrypoints, int PublishableModules, int Helpers);
 
-internal sealed record GitHubMatrix(IReadOnlyList<CiAffectedItem> Include);
 
 internal sealed record CiAffectedItem(
     string Path,

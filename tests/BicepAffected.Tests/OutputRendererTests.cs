@@ -22,16 +22,18 @@ public sealed class OutputRendererTests
         var json = JsonRenderer.Render(Result);
         using var document = JsonDocument.Parse(json);
 
-        Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(document.RootElement.GetProperty("hasAffected").GetBoolean());
         var entrypoint = document.RootElement.GetProperty("entrypoints")[0];
         Assert.Equal("main", entrypoint.GetProperty("fileName").GetString());
         Assert.Matches("^deployments-employees-main-[0-9a-f]{12}-bicep$", entrypoint.GetProperty("artifactName").GetString());
         Assert.False(entrypoint.TryGetProperty("buildCommand", out _));
+        Assert.False(document.RootElement.TryGetProperty("matrix", out _));
+        Assert.False(document.RootElement.TryGetProperty("publishMatrix", out _));
     }
 
     [Fact]
-    public void Json_output_contains_publish_matrix_for_modules_with_version_changes()
+    public void Json_output_contains_publishable_modules_with_version_changes()
     {
         var result = new AffectedResult(
             ["Function/Infrastructure/metadata.json"],
@@ -48,7 +50,7 @@ public sealed class OutputRendererTests
 
         Assert.True(document.RootElement.GetProperty("hasPublishableModulesToPublish").GetBoolean());
         Assert.Equal("1.0.0-beta", document.RootElement.GetProperty("publishableModulesToPublish")[0].GetProperty("version").GetString());
-        Assert.Equal("v1.0.0-beta", document.RootElement.GetProperty("publishMatrix").GetProperty("include")[0].GetProperty("versionTag").GetString());
+        Assert.Equal("v1.0.0-beta", document.RootElement.GetProperty("publishableModulesToPublish")[0].GetProperty("versionTag").GetString());
         Assert.Empty(document.RootElement.GetProperty("publishableModulesWithoutVersionChange").EnumerateArray());
     }
 
@@ -125,20 +127,6 @@ public sealed class OutputRendererTests
         Assert.All(artifactNames, artifactName => Assert.Matches("^[a-z0-9-]+-[0-9a-f]{12}-bicep$", artifactName));
     }
 
-    [Fact]
-    public void GitHub_output_contains_data_only_outputs_and_warnings_json()
-    {
-        var output = PipelineOutputRenderer.RenderGitHub(CiPayload.FromResult(Result with { Warnings = ["z warning", "a warning"] }));
-
-        Assert.Contains("has_affected=true", output, StringComparison.Ordinal);
-        Assert.Contains("has_publish_modules=", output, StringComparison.Ordinal);
-        Assert.Contains("matrix=", output, StringComparison.Ordinal);
-        Assert.Contains("publish_matrix=", output, StringComparison.Ordinal);
-        Assert.Contains("modules_without_version_change_json=", output, StringComparison.Ordinal);
-        Assert.Contains("entrypoints_json=", output, StringComparison.Ordinal);
-        Assert.Contains("warnings_json=[\"a warning\",\"z warning\"]", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("buildCommand", output, StringComparison.Ordinal);
-    }
 
     private static AffectedItem Item(string path, NodeKind kind) =>
         new(path, kind, [new Reason("directChange", path, [path], "File changed.")]);

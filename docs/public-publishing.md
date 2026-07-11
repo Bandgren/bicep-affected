@@ -4,11 +4,11 @@
 
 ## Install the current public beta
 
-Download [`BicepAffected.0.1.0-beta.1.nupkg`](https://github.com/Bandgren/bicep-affected/releases/download/v0.1.0-beta.1/BicepAffected.0.1.0-beta.1.nupkg) into a local directory, then use that directory as an explicit package source:
+Download [`BicepAffected.0.1.0-beta.2.nupkg`](https://github.com/Bandgren/bicep-affected/releases/download/v0.1.0-beta.2/BicepAffected.0.1.0-beta.2.nupkg) into a local directory, then use that directory as an explicit package source:
 
 ```bash
 dotnet tool install --global BicepAffected \
-  --version 0.1.0-beta.1 \
+  --version 0.1.0-beta.2 \
   --add-source ./downloaded-packages
 bicep-affected --help
 ```
@@ -18,7 +18,7 @@ For a repository-local pinned tool:
 ```bash
 dotnet new tool-manifest
 dotnet tool install BicepAffected \
-  --version 0.1.0-beta.1 \
+  --version 0.1.0-beta.2 \
   --add-source ./downloaded-packages
 dotnet tool run bicep-affected --help
 ```
@@ -28,7 +28,7 @@ The source directory must contain the downloaded `.nupkg`. Prerelease versions r
 After `BicepAffected` is published and indexed on NuGet.org, the additional source is no longer needed:
 
 ```bash
-dotnet tool install --global BicepAffected --version 0.1.0-beta.1
+dotnet tool install --global BicepAffected --version 0.1.0-beta.2
 ```
 
 ## Trusted publishing setup
@@ -53,11 +53,11 @@ The official setup details are in [NuGet Trusted Publishing](https://learn.micro
 
 The workflow accepts a NuGet SemVer 2.0 version without build metadata. It restores with committed lock files, builds, runs the full test suite, packs once, installs the exact local package, and requests a one-hour NuGet.org API key through OIDC immediately before the push.
 
-For the initial beta:
+For the current beta:
 
-1. Push tag `v0.1.0-beta.1` on the reviewed `master` commit.
+1. Push tag `v0.1.0-beta.2` on the reviewed `master` commit.
 2. Open **Actions → Publish Tool → Run workflow** on that tag.
-3. Enter `0.1.0-beta.1` as the package version.
+3. Enter `0.1.0-beta.2` as the package version.
 4. Approve the protected `nuget` environment deployment.
 
 The workflow refuses a tag whose name does not exactly match `v<package-version>`. It also permits a protected manual publish from `master`, but a matching version tag is preferred for public releases.

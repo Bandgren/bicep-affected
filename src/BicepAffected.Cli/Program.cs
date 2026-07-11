@@ -177,10 +177,6 @@ internal static class Cli
             throw new InvalidOperationException($"The graph command does not support: {string.Join(", ", ignoredOptions)}.");
         }
 
-        if (options.Format.Equals("github", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("The graph command supports --format text or json.");
-        }
     }
 
     private static IReadOnlyList<string> ResolveChangedFiles(string repoRoot, CliOptions options)
@@ -271,9 +267,9 @@ internal static class Cli
             }
         }
 
-        if (options.Format is not ("text" or "json" or "github"))
+        if (options.Format is not ("text" or "json"))
         {
-            throw new InvalidOperationException("--format must be one of: text, json, github.");
+            throw new InvalidOperationException("--format must be one of: text, json.");
         }
 
         return options;
@@ -320,7 +316,6 @@ internal static class Cli
         return format.ToLowerInvariant() switch
         {
             "json" => JsonRenderer.Render(payload),
-            "github" => PipelineOutputRenderer.RenderGitHub(payload),
             _ => TextRenderer.Render(result with { Warnings = payload.Warnings })
         };
     }
@@ -352,11 +347,6 @@ internal static class Cli
             File.WriteAllText(options.OutputPath, rendered + Environment.NewLine);
         }
 
-        if (options.Format.Equals("github", StringComparison.OrdinalIgnoreCase)
-            && Environment.GetEnvironmentVariable("GITHUB_OUTPUT") is { Length: > 0 } githubOutput)
-        {
-            File.AppendAllText(githubOutput, rendered + Environment.NewLine);
-        }
 
         Console.WriteLine(rendered);
     }
@@ -391,7 +381,7 @@ internal static class Cli
         Console.WriteLine("  --changed-file <path>         Explicit changed file. Repeatable.");
         Console.WriteLine("  --changed-files-stdin         Read changed files from stdin.");
         Console.WriteLine("  --config <path>               Optional bicep-affected.json path.");
-        Console.WriteLine("  --format text|json|github");
+        Console.WriteLine("  --format text|json             Output format. Defaults to text.");
         Console.WriteLine("  --include all|entrypoints|modules|helpers");
         Console.WriteLine("  --output <path>               Write rendered output to a file.");
         Console.WriteLine("  --publish-version-file <file> Extra adjacent version file name for publish gating. Repeatable.");

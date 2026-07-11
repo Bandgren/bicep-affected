@@ -8,7 +8,7 @@ This document preserves the review conclusions that informed the hardened implem
 | --- | --- |
 | Deleted/renamed and explicit changed-path handling | **Resolved contract.** Changed-file inputs are validated strictly, preserve raw Git path spelling, and are analyzed conservatively within repository containment rules. |
 | Parameter-file impact | **Resolved contract.** `.bicepparam` and conventional parameter-file relationships are part of affected analysis. |
-| CI-native output | **Resolved contract.** Text, JSON, and GitHub Actions output are supported. JSON is schema version 1, deterministic, and data-only. |
+| CI-native output | **Resolved contract.** Default text and optional JSON output are supported. JSON is schema version 2, deterministic, and data-only. |
 | Path casing and containment | **Resolved contract.** Path comparison follows the supported platform behavior, while traversal, empty/NUL input, and physical symlink escape are rejected. |
 | Metadata failures | **Resolved contract.** Metadata/version problems surface as warnings; warnings fail closed unless explicitly allowed for a shadow rollout. |
 | CLI/output regression coverage | **Resolved contract.** The command, exit, configuration, output, and automation contracts are regression-tested. |
@@ -23,11 +23,11 @@ This document preserves the review conclusions that informed the hardened implem
 | The analyzer emits a warning or fails | Use the full-validation fallback. Do not weaken a blocking job with `--allow-warnings`. |
 | A new tool version is introduced | Pin it, run a non-blocking shadow comparison, then promote only after comparison with full validation. |
 | A regression is discovered after promotion | Roll back to the last known-good pinned tool version and re-enable full validation while investigating. |
-| A module is affected without an adjacent configured version-file change | It remains out of `publishMatrix`; decide and make the version change through the normal release process. |
+| A module is affected without an adjacent configured version-file change | It remains out of `publishableModulesToPublish`; decide and make the version change through the normal release process. |
 
 ## Output contract conclusions
 
-`affected --format json` and `graph --format json` both declare `schemaVersion: 1`. Node, item, and dependency kinds are strings. CI fields are sorted and data-only, so consumers must not look for or execute a `buildCommand`; no YAML or Azure DevOps matrix contract exists.
+`affected --format json` and `graph --format json` both declare `schemaVersion: 2`. Node, item, and dependency kinds are strings. The affected payload contains canonical affected arrays rather than provider-specific matrix wrappers; consumers must not look for or execute a `buildCommand`, and no YAML, Azure DevOps, or GitHub Actions output contract exists.
 
 The configuration file is an object with only `entrypoints`, `helpers`, `publishableModules`, and `globalImpactFiles`. See the root [strict schema](../bicep-affected.schema.json) and the [README configuration example](../README.md#configuration). Omitted collections select runtime defaults; explicit empty arrays deliberately select no values for that collection.
 

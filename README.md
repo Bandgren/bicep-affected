@@ -1,22 +1,22 @@
 # bicep-affected
 
-`bicep-affected` determines which Bicep deployment entrypoints, publishable modules, and helpers are affected by a changed-file set. It emits a human-readable report, a deterministic JSON contract, or GitHub Actions step outputs.
+`bicep-affected` determines which Bicep deployment entrypoints, publishable modules, and helpers are affected by a changed-file set. By default it emits a human-readable text report; it can also emit a deterministic JSON contract.
 
 ## Install
 
-The beta is currently distributed as a public package asset on the [0.1.0-beta.1 GitHub release](https://github.com/Bandgren/bicep-affected/releases/tag/v0.1.0-beta.1); it is **not yet indexed on NuGet.org**.
+The beta is currently distributed as a public package asset on the [0.1.0-beta.2 GitHub release](https://github.com/Bandgren/bicep-affected/releases/tag/v0.1.0-beta.2); it is **not yet indexed on NuGet.org**.
 
-1. Download `BicepAffected.0.1.0-beta.1.nupkg` into a local directory such as `./downloaded-packages`.
+1. Download `BicepAffected.0.1.0-beta.2.nupkg` into a local directory such as `./downloaded-packages`.
 2. Install it from that directory:
 
 ```bash
 dotnet tool install --global BicepAffected \
-  --version 0.1.0-beta.1 \
+  --version 0.1.0-beta.2 \
   --add-source ./downloaded-packages
 bicep-affected --help
 ```
 
-The shorter `dotnet tool install --global BicepAffected --version 0.1.0-beta.1` command will work only after the package is published and indexed on NuGet.org. For repository-local installation and publishing status, see [public publishing](docs/public-publishing.md).
+The shorter `dotnet tool install --global BicepAffected --version 0.1.0-beta.2` command will work only after the package is published and indexed on NuGet.org. For repository-local installation and publishing status, see [public publishing](docs/public-publishing.md).
 
 To build from source, use the SDK pinned by `global.json` and the committed dependency locks:
 
@@ -55,7 +55,7 @@ Common `affected` options are:
 ```text
 --repo <path>                         Repository root (default: current directory)
 --config <path>                       Config file (default lookup: bicep-affected.json)
---format text|json|github             Output format (default: text)
+--format text|json                    Output format (default: text)
 --include all|entrypoints|modules|helpers
 --publish-version-file <file>         Repeatable simple adjacent filename
 --output <path>                       Write rendered output to a file
@@ -69,6 +69,22 @@ Common `affected` options are:
 ```bash
 bicep-affected affected --repo . --from origin/master --to HEAD --format json --output affected.json
 ```
+
+### Default text output
+
+Without `--format`, the report is human-readable text. For the monorepo fixture, changing `apis/employees/openapi.yaml` affects `deployments/employees/main.bicep` through a content-load reverse dependency:
+
+```text
+Changed files:
+  apis/employees/openapi.yaml
+
+Affected entrypoints:
+  deployments/employees/main.bicep
+    reason: Affected through content-load dependency. caused by apis/employees/openapi.yaml
+    chain: apis/employees/openapi.yaml -> deployments/employees/main.bicep
+```
+
+Use `--format json` only when another trusted program needs to consume the result.
 
 ## Exit and warning policy
 
@@ -110,9 +126,9 @@ Repository paths are constrained defensively. The repository root must exist; a 
 
 ## JSON contracts
 
-Both JSON formats use `schemaVersion: 1`. JSON is indented, camel-cased, deterministic, and data-only: it contains no shell command such as `buildCommand`.
+Both JSON formats use `schemaVersion: 2`. JSON is indented, camel-cased, deterministic, and data-only: it contains no shell command such as `buildCommand`.
 
-`affected --format json` contains `hasAffected`, `hasPublishableModulesToPublish`, `counts`, sorted `changedFiles`, affected item arrays, `githubMatrix`, `publishMatrix`, and sorted `warnings`. An affected item has the data fields:
+`affected --format json` contains `hasAffected`, `hasPublishableModulesToPublish`, `counts`, sorted `changedFiles`, the canonical affected arrays (`entrypoints`, `publishableModules`, `publishableModulesToPublish`, `publishableModulesWithoutVersionChange`, and `helpers`), and sorted `warnings`. An affected item has the data fields:
 
 ```text
 path, kind, directory, fileName, artifactName,
@@ -121,9 +137,7 @@ versionFile, version, versionTag, hasVersionChange, reasons
 
 Kinds are strings, not numeric enums. Affected-item kinds are `entrypoint`, `publishableModule`, or `helper`; graph node kinds additionally include `unknownBicepFile`, `contentFile`, and `configFile`; edge kinds are `localModule`, `compileTimeImport`, `contentLoad`, `directoryContent`, `parameterFile`, `globalConfig`, or `externalModule`. `artifactName` is stable and filesystem-oriented: a lower-case path stem with non-alphanumeric characters changed to `-`, followed by `-`, the first 12 lower-case hex characters of the SHA-256 of the normalized path, and `-bicep`. Do not reconstruct or use an artifact name as a command.
 
-`graph --format json` has `schemaVersion: 1`, sorted `nodes`, sorted `edges`, sorted `warnings`, and sorted `parseDiagnosticFiles`. Node and edge kinds are likewise strings; nullable graph fields remain JSON `null` when absent.
-
-`--format github` writes compact data-only key/value outputs to standard output and, when `GITHUB_OUTPUT` is set, appends them there. It is intended for a later `fromJSON` matrix, never for interpolating repository-controlled values into a shell script.
+`graph --format json` has `schemaVersion: 2`, sorted `nodes`, sorted `edges`, sorted `warnings`, and sorted `parseDiagnosticFiles`. Node and edge kinds are likewise strings; nullable graph fields remain JSON `null` when absent.
 
 ## CI rollout, fallback, and recovery
 
@@ -142,7 +156,7 @@ To upgrade, pin a tested tool version in each workflow, run shadow validation, t
 - **No changes detected:** ensure exactly one input mode is used, fetch the compared refs, and use a repository-relative path.
 - **Config rejected:** validate against [bicep-affected.schema.json](bicep-affected.schema.json), remove unknown keys/nulls, and ensure the config path stays inside the repository.
 - **Path escape error:** remove `..`, absolute paths, or a symlink that resolves outside the repository.
-- **Unexpected publish skip:** inspect `publishableModulesWithoutVersionChange`; only modules with a changed adjacent configured version file are in `publishMatrix`.
+- **Unexpected publish skip:** inspect `publishableModulesWithoutVersionChange`; only modules with a changed adjacent configured version file appear in `publishableModulesToPublish`.
 
 ## Workflow and publishing examples
 

@@ -10,7 +10,7 @@ The supported contract is intentionally narrow and strict:
 - `graph` does not accept affected-only input, include, publish, or fail-policy flags; it does accept `--allow-warnings` so graph-extraction warnings can be handled with the same explicit policy.
 - Unknown options, invalid formats, invalid includes, incomplete ranges, and invalid adjacent version-file names are errors.
 - Analysis warnings fail closed with exit 1 unless a caller deliberately supplies `--allow-warnings`; warnings remain visible.
-- JSON and graph JSON use `schemaVersion: 1`, string kinds, deterministic ordering, and data-only fields. There is no `buildCommand` in the current payload.
+- JSON and graph JSON use `schemaVersion: 2`, string kinds, deterministic ordering, and data-only fields. There is no `buildCommand` in the current payload.
 - Configuration is strict: unknown members, non-array collections, and null collection entries are rejected; omitted versus explicitly empty arrays retain their documented distinct meanings.
 - Repository/config/dependency paths are constrained to the repository and checked against traversal and symlink escape.
 
@@ -23,17 +23,16 @@ The [README](../README.md) is the user-facing specification; the root [JSON Sche
 | Changed-file modes could drift or be combined accidentally | **Resolved.** Exactly-one input-mode validation is enforced. |
 | Git paths were rewritten or unsafe repository reads were possible | **Resolved.** Raw Git path spelling is preserved and repository containment/symlink checks are enforced. |
 | Warnings could silently permit a CI pass | **Resolved.** Warnings fail closed by default; `--allow-warnings` is explicit. |
-| CLI/output behavior lacked a stable machine contract | **Resolved.** Schema version 1, string kinds, deterministic fields, and regression coverage define the JSON contract. |
-| Artifact names could collide | **Resolved.** Names include a normalized path stem and a 12-character SHA-256 suffix. |
+| CLI/output behavior lacked a stable machine contract | **Resolved.** Schema version 2, string kinds, deterministic fields, and regression coverage define the JSON contract. |
 | Generic payloads contained executable build instructions | **Resolved.** Output is data-only; consumers apply their own trusted workflow policy. |
-| YAML/Azure DevOps output was implied | **Resolved.** The supported formats are text, JSON, and GitHub output. No Azure matrix or YAML output contract is claimed. |
+| YAML/Azure DevOps output was implied | **Resolved.** The supported formats are text and JSON. No provider-specific matrix, Azure matrix, or YAML output contract is claimed. |
 
 ## Current operational boundaries
 
 - Local registry/template-spec dependencies are external references; they are not resolved back to source files in a different repository.
 - Analysis models the supported local Bicep syntax and literal content-load paths. A warning is a safety signal, not a result to ignore in a blocking workflow.
-- A changed publishable module enters `publishMatrix` only when an adjacent configured publish-version file changed and valid version metadata can be read.
-- `--output` writes the rendered text or JSON payload to a file for both `affected` and `graph`; GitHub output additionally appends to `GITHUB_OUTPUT` when that environment variable is set.
+- A changed publishable module appears in `publishableModulesToPublish` only when an adjacent configured publish-version file changed and valid version metadata can be read.
+- `--output` writes the rendered text or JSON payload to a file for both `affected` and `graph`.
 
 ## Review outcome
 

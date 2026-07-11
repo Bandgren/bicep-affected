@@ -19,6 +19,18 @@ public sealed class CliIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Affected_without_format_outputs_human_readable_text()
+    {
+        var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Changed files:\n  apis/employees/openapi.yaml", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("Affected entrypoints:\n  deployments/employees/main.bicep", result.StdOut, StringComparison.Ordinal);
+        Assert.Contains("reason: Affected through content-load dependency. caused by apis/employees/openapi.yaml", result.StdOut, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"schemaVersion\"", result.StdOut, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Fail_if_none_returns_exit_code_three()
     {
         var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/unreferenced.yaml", "--fail-if-none");
@@ -53,20 +65,9 @@ public sealed class CliIntegrationTests : IDisposable
         Assert.Contains("deployments/employees/main.bicep", File.ReadAllText(outputPath), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void GitHub_output_appends_to_github_output_file()
-    {
-        var githubOutputPath = CreateTempPath("github-output.txt");
-        var result = RunCli(
-            ["affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--format", "github"],
-            new Dictionary<string, string?> { ["GITHUB_OUTPUT"] = githubOutputPath });
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.Contains("has_affected=true", File.ReadAllText(githubOutputPath), StringComparison.Ordinal);
-    }
 
     [Fact]
-    public void Publish_version_file_option_marks_publish_modules()
+    public void Publish_version_file_option_outputs_publish_metadata_as_json()
     {
         var result = RunCli(
             "affected",
@@ -77,18 +78,24 @@ public sealed class CliIntegrationTests : IDisposable
             "--publish-version-file",
             "version.json",
             "--format",
-            "github",
+            "json",
             "--include",
             "modules",
             "--allow-warnings");
+
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("has_publish_modules=true", result.StdOut, StringComparison.Ordinal);
-        Assert.Contains("Function/Infrastructure/functionWithoutSlot.bicep", result.StdOut, StringComparison.Ordinal);
-        Assert.Contains("\"versionFile\":\"Function/Infrastructure/version.json\"", result.StdOut, StringComparison.Ordinal);
-        Assert.Contains("\"versionTag\":\"v2.1.0-preview\"", result.StdOut, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(result.StdOut);
+        var module = Assert.Single(document.RootElement.GetProperty("publishableModulesToPublish").EnumerateArray());
+        Assert.Equal("Function/Infrastructure/functionWithoutSlot.bicep", module.GetProperty("path").GetString());
+        Assert.Equal("Function/Infrastructure/version.json", module.GetProperty("versionFile").GetString());
+        Assert.Equal("2.1.0-preview", module.GetProperty("version").GetString());
+        Assert.Equal("v2.1.0-preview", module.GetProperty("versionTag").GetString());
+        Assert.False(document.RootElement.TryGetProperty("matrix", out _));
+        Assert.False(document.RootElement.TryGetProperty("publishMatrix", out _));
     }
 
     [Theory]
+    [InlineData("github")]
     [InlineData("yaml")]
     [InlineData("azure-devops")]
     public void Unsupported_formats_fail(string format)
@@ -96,7 +103,7 @@ public sealed class CliIntegrationTests : IDisposable
         var result = RunCli("affected", "--repo", FixturePaths.Root("monorepo"), "--changed-file", "apis/employees/openapi.yaml", "--format", format);
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("--format must be one of: text, json, github", result.StdErr, StringComparison.Ordinal);
+        Assert.Contains("--format must be one of: text, json.", result.StdErr, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -259,15 +266,15 @@ public sealed class CliIntegrationTests : IDisposable
 
     private static CliRunResult RunCli(params string[] args)
     {
-        return RunCli(args, environment: null);
+        return RunCli(args, input: null);
     }
 
     private static CliRunResult RunCliWithInput(string input, params string[] args)
     {
-        return RunCli(args, environment: null, input: input);
+        return RunCli(args, input);
     }
 
-    private static CliRunResult RunCli(string[] args, IReadOnlyDictionary<string, string?>? environment, string? input = null)
+    private static CliRunResult RunCli(string[] args, string? input = null)
     {
         var dotnetHostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         var processPath = Environment.ProcessPath;
@@ -292,13 +299,6 @@ public sealed class CliIntegrationTests : IDisposable
             startInfo.ArgumentList.Add(arg);
         }
 
-        if (environment is not null)
-        {
-            foreach (var (key, value) in environment)
-            {
-                startInfo.Environment[key] = value;
-            }
-        }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start CLI process.");
         if (input is not null)
