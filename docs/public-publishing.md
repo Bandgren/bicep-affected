@@ -1,36 +1,35 @@
 # Public NuGet publishing and installation
 
-`BicepAffected` is a public .NET global tool. Stable and prerelease packages are distributed through [NuGet.org](https://www.nuget.org/) so consumers do not need a private feed or package credential.
+`BicepAffected` is a public .NET global tool. The current beta is attached to its public GitHub release while NuGet.org Trusted Publishing is being activated.
 
-## Install the public beta
+## Install the current public beta
 
-Install an explicit prerelease version:
+Download [`BicepAffected.0.1.0-beta.1.nupkg`](https://github.com/Bandgren/bicep-affected/releases/download/v0.1.0-beta.1/BicepAffected.0.1.0-beta.1.nupkg) into a local directory, then use that directory as an explicit package source:
+
+```bash
+dotnet tool install --global BicepAffected \
+  --version 0.1.0-beta.1 \
+  --add-source ./downloaded-packages
+bicep-affected --help
+```
+
+For a repository-local pinned tool:
+
+```bash
+dotnet new tool-manifest
+dotnet tool install BicepAffected \
+  --version 0.1.0-beta.1 \
+  --add-source ./downloaded-packages
+dotnet tool run bicep-affected --help
+```
+
+The source directory must contain the downloaded `.nupkg`. Prerelease versions require an explicit `--version`.
+
+After `BicepAffected` is published and indexed on NuGet.org, the additional source is no longer needed:
 
 ```bash
 dotnet tool install --global BicepAffected --version 0.1.0-beta.1
 ```
-
-Run it with:
-
-```bash
-bicep-affected --help
-```
-
-Update or roll back by selecting an explicit version:
-
-```bash
-dotnet tool update --global BicepAffected --version 0.1.0-beta.1
-```
-
-For a repository-local pinned tool, create a tool manifest and install into it:
-
-```bash
-dotnet new tool-manifest
-dotnet tool install BicepAffected --version 0.1.0-beta.1
-dotnet tool run bicep-affected --help
-```
-
-Prerelease versions are not selected implicitly. Keep `--version` explicit until a stable release is published.
 
 ## Trusted publishing setup
 

@@ -4,14 +4,19 @@
 
 ## Install
 
-Install the public beta from NuGet.org with .NET 10:
+The beta is currently distributed as a public package asset on the [0.1.0-beta.1 GitHub release](https://github.com/Bandgren/bicep-affected/releases/tag/v0.1.0-beta.1); it is **not yet indexed on NuGet.org**.
+
+1. Download `BicepAffected.0.1.0-beta.1.nupkg` into a local directory such as `./downloaded-packages`.
+2. Install it from that directory:
 
 ```bash
-dotnet tool install --global BicepAffected --version 0.1.0-beta.1
+dotnet tool install --global BicepAffected \
+  --version 0.1.0-beta.1 \
+  --add-source ./downloaded-packages
 bicep-affected --help
 ```
 
-Prerelease versions require an explicit `--version`. For a repository-local pinned installation, use a .NET tool manifest as described in [public publishing](docs/public-publishing.md).
+The shorter `dotnet tool install --global BicepAffected --version 0.1.0-beta.1` command will work only after the package is published and indexed on NuGet.org. For repository-local installation and publishing status, see [public publishing](docs/public-publishing.md).
 
 To build from source, use the SDK pinned by `global.json` and the committed dependency locks:
 
