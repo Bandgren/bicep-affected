@@ -86,6 +86,36 @@ Affected entrypoints:
 
 Use `--format json` only when another trusted program needs to consume the result.
 
+### Select Bicep entrypoints to deploy
+
+Content loaded by a Bicep file is part of the dependency graph. For example, the fixture entrypoint `deployments/employees/main.bicep` calls `loadTextContent('../../apis/employees/policy.xml')`. Changing that APIM policy marks the entrypoint as affected:
+
+```bash
+bicep-affected affected \
+  --repo . \
+  --changed-file apis/employees/policy.xml \
+  --include entrypoints \
+  --format json \
+  --output affected.json
+
+jq -r '.entrypoints[].path' affected.json
+```
+
+```text
+deployments/employees/main.bicep
+```
+
+For a Git comparison, replace `--changed-file` with `--from <base-ref> --to <target-ref>`. A deployment job can iterate the same array:
+
+```bash
+jq -r '.entrypoints[].path' affected.json |
+  while IFS= read -r bicep_path; do
+    ./ci/deploy-bicep.sh "$bicep_path"
+  done
+```
+
+The tool deliberately returns affected paths and reasons rather than deployment commands. The trusted `deploy-bicep.sh` owned by the consuming repository must validate each path and map it to the correct deployment scope, environment, parameter file, and credentials. Keep warning handling fail-closed in deployment jobs; an incomplete graph must not silently skip a deployment.
+
 ## Exit and warning policy
 
 | Exit | Meaning |

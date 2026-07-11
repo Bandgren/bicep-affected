@@ -98,6 +98,27 @@ jobs:
 
 The report is parsed only after checking its schema version and expected array type. Values are read as data, stored in shell variables, and quoted at their command boundary; no JSON value is interpolated into shell source.
 
+## Deployment selection
+
+The affected entrypoint array is also the deployment selection contract. Literal content-load dependencies are traversed in reverse: if `deployments/employees/main.bicep` uses `loadTextContent('../../apis/employees/policy.xml')`, changing `apis/employees/policy.xml` places `deployments/employees/main.bicep` in `.entrypoints` with a `reverseDependency` reason and the full dependency chain.
+
+Keep deployment policy in a trusted repository script rather than accepting commands from detector output:
+
+```yaml
+- name: Deploy affected entrypoints
+  env:
+    REPORT: ${{ runner.temp }}/bicep-affected.json
+  shell: bash
+  run: |
+    jq -e '.schemaVersion == 2 and (.entrypoints | type == "array")' "$REPORT" > /dev/null
+    jq -r '.entrypoints[].path' "$REPORT" |
+      while IFS= read -r bicep_path; do
+        ./ci/deploy-bicep.sh "$bicep_path"
+      done
+```
+
+`deploy-bicep.sh` must reject unknown paths and map approved entrypoints to their deployment scope, environment, parameter file, and credentials. Do not use `--allow-warnings` in this job: a warning may indicate an incomplete graph, so deployment selection must fail closed.
+
 ## Deliberate shadow rollout
 
 A shadow job may keep reporting when the detector emits warnings, while the established full-validation job remains authoritative. It must be visibly non-blocking and should have a finite removal plan. This is the only appropriate use of `--allow-warnings`:
