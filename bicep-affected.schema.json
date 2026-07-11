@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "bicep-affected configuration",
+  "description": "Strict configuration for bicep-affected. Omit a property to use its runtime default; provide an empty array to explicitly select no values for that property.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entrypoints": {
+      "description": "Glob patterns classifying deployment entrypoints. Omitted defaults to an empty list; an explicit empty list also classifies none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" },
+      "default": []
+    },
+    "helpers": {
+      "description": "Glob patterns classifying helper Bicep files. Omitted defaults to an empty list; an explicit empty list also classifies none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" },
+      "default": []
+    },
+    "publishableModules": {
+      "description": "Publishable module rules. Omit to use the default **/*.bicep rule with metadata.json; use [] to disable publishable-module classification.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/publishableModuleRule" },
+      "default": [
+        {
+          "path": "**/*.bicep",
+          "metadata": "metadata.json"
+        }
+      ]
+    },
+    "globalImpactFiles": {
+      "description": "Glob patterns whose changes affect the repository. Omit to use **/bicepconfig.json; use [] to disable this global-impact rule.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" },
+      "default": ["**/bicepconfig.json"]
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "publishableModuleRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Bicep glob. Omit to use **/*.bicep.",
+          "allOf": [
+            { "$ref": "#/$defs/nonEmptyString" }
+          ],
+          "default": "**/*.bicep"
+        },
+        "metadata": {
+          "description": "Adjacent metadata filename. Omit to use metadata.json.",
+          "allOf": [
+            { "$ref": "#/$defs/nonEmptyString" },
+            { "type": "string", "pattern": "^[^/\\\\]+$" },
+            { "not": { "enum": [".", ".."] } }
+          ],
+          "default": "metadata.json"
+        }
+      }
+    }
+  }
+}

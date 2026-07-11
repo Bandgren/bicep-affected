@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\BicepAffected.Core\BicepAffected.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>bicep-affected</ToolCommandName>
+    <PackageId>BicepAffected</PackageId>
+    <Version>0.1.0-beta.1</Version>
+    <Authors>bicep-affected contributors</Authors>
+    <Description>Find Bicep files, entrypoints, and publishable modules affected by changed files.</Description>
+    <PackageTitle>BicepAffected</PackageTitle>
+    <PackageTags>bicep;azure;cli;affected</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Bandgren/bicep-affected</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Bandgren/bicep-affected.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>Initial public beta release with fail-closed affected analysis and deterministic CI outputs.</PackageReleaseNotes>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+{
+  "entrypoints": [
+    "deployments/**/*.bicep"
+  ],
+  "helpers": [
+    "infra/shared/**/*.bicep"
+  ],
+  "globalImpactFiles": [
+    "bicepconfig.json"
+  ]
+}

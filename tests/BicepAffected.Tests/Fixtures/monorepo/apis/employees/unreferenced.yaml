@@ -1,0 +1,4 @@
+openapi: 3.0.1
+info:
+  title: Unreferenced
+  version: 1.0.0

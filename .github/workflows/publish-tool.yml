@@ -1,0 +1,107 @@
+name: Publish Tool
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version, for example 0.1.0-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-bicep-affected
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    name: Publish BicepAffected Tool
+    runs-on: ubuntu-latest
+    environment: nuget
+    env:
+      PACKAGE_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout Repository
+        # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        # v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+
+      - name: Validate Package Version
+        shell: bash
+        run: |
+          semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+          if [[ ! "$PACKAGE_VERSION" =~ $semver_pattern ]]; then
+            echo "Package version must be a NuGet SemVer 2.0 version without build metadata." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/master" && "$GITHUB_REF" != "refs/tags/v$PACKAGE_VERSION" ]]; then
+            echo "Publishing is permitted only from master or a tag matching the package version." >&2
+            exit 1
+          fi
+
+      - name: Restore Dependencies
+        run: dotnet restore --locked-mode
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test --configuration Release --no-build --no-restore
+
+      - name: Pack Tool
+        run: |
+          dotnet pack src/BicepAffected.Cli/BicepAffected.Cli.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore \
+            --output artifacts \
+            /p:PackageVersion="$PACKAGE_VERSION"
+
+      - name: Smoke Test Packed Tool
+        run: |
+          config_path="$RUNNER_TEMP/NuGet.Config"
+          package_path="artifacts/BicepAffected.${PACKAGE_VERSION}.nupkg"
+          tool_path="$RUNNER_TEMP/bicep-affected-tool"
+          test -f "$package_path"
+          printf '%s\n' \
+            '<configuration>' \
+            '  <packageSources>' \
+            '    <clear />' \
+            "    <add key=\"packed-artifacts\" value=\"$PWD/artifacts\" />" \
+            '  </packageSources>' \
+            '</configuration>' > "$config_path"
+          dotnet tool install \
+            --configfile "$config_path" \
+            --tool-path "$tool_path" \
+            --version "$PACKAGE_VERSION" \
+            BicepAffected
+          "$tool_path/bicep-affected" --help
+
+      - name: Authenticate to NuGet.org
+        id: nuget-login
+        # NuGet/login v1.2.0
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841
+        with:
+          user: Bandgren
+
+      - name: Publish to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          package_path="artifacts/BicepAffected.${PACKAGE_VERSION}.nupkg"
+          test -f "$package_path"
+          dotnet nuget push "$package_path" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY"

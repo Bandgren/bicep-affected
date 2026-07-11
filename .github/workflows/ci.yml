@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-pack:
+    name: Build, Test, Pack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        # v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+
+      - name: Restore Dependencies
+        run: dotnet restore --locked-mode
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test --configuration Release --no-build --no-restore
+
+      - name: Pack Tool
+        run: |
+          dotnet pack src/BicepAffected.Cli/BicepAffected.Cli.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore \
+            --output artifacts \
+            /p:PackageVersion=0.0.0-ci
+
+      - name: Smoke Test Packed Tool
+        run: |
+          config_path="$RUNNER_TEMP/NuGet.Config"
+          package_path="artifacts/BicepAffected.0.0.0-ci.nupkg"
+          test -f "$package_path"
+          tool_path="$RUNNER_TEMP/bicep-affected-tool"
+          printf '%s\n' \
+            '<configuration>' \
+            '  <packageSources>' \
+            '    <clear />' \
+            "    <add key=\"packed-artifacts\" value=\"$PWD/artifacts\" />" \
+            '  </packageSources>' \
+            '</configuration>' > "$config_path"
+          dotnet tool install \
+            --configfile "$config_path" \
+            --tool-path "$tool_path" \
+            --version "0.0.0-ci" \
+            BicepAffected
+          "$tool_path/bicep-affected" --help
